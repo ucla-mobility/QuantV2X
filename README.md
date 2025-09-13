@@ -20,14 +20,11 @@ The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-
 ## Citation
 If you find this repository useful for your research, please consider giving us a star 🌟 and citing our paper.
  ```bibtex
-@misc{zhao2025quantv2x,
-      title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception}, 
-      author={Seth Z. Zhao and Huizhi Zhang and Zhaowei Li and Juntong Peng and Anthony Chui and Zewei Zhou and Zonglin Meng and Hao Xiang and Zhiyu Huang and Fujia Wang and Ran Tian and Chenfeng Xu and Bolei Zhou and Jiaqi Ma},
-      year={2025},
-      eprint={2509.03704},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2509.03704}, 
+@article{zhao2025quantv2x,
+  title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception},
+  author={Zhao, Seth Z and Zhang, Huizhi and Li, Zhaowei and Peng, Juntong and Chui, Anthony and Zhou, Zewei and Meng, Zonglin and Xiang, Hao and Huang, Zhiyu and Wang, Fujia and others},
+  journal={arXiv preprint arXiv:2509.03704},
+  year={2025}
 }
 ```
 
