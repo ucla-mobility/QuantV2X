@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python ./opencood/tools/inference.py --model_dir /yourlogs --save_vis_interval 40

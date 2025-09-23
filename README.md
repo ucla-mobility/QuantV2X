@@ -20,10 +20,10 @@ This work is part of our broader vision of building an __efficient and scalable 
 - [√] Full-Precision Baseline Training and Inference on V2X-Real Dataset, covering the original functionality of [V2X-Real](https://github.com/ucla-mobility/V2X-Real) codebase.
 - [√] Codebook Learning Training and Inference Pipeline.
 - [√] Post-Training Quantization (PTQ) Pipeline.
-- [TODO] Support on OPV2V(-H) and DAIR-V2X datasets.
+- [√] Support on OPV2V(-H) and DAIR-V2X datasets.
 - [TODO] TensorRT Deployment Pipeline.
 
-## Data Download
+## V2X-Real Data Download
 
 For V2X-Real dataset, please check [website](https://mobility-lab.seas.ucla.edu/v2x-real/) to download the data. The data is in OPV2V format. 
 
@@ -35,6 +35,13 @@ After downloading the data, please put the data in the following structure:
 │   ├── validate
 │   ├── test
 ```
+
+## Other Data Preparation
+- OPV2V: Please refer to [this repo](https://github.com/DerrickXuNu/OpenCOOD). You also need to download `additional-001.zip` which stores data for camera modality.
+- OPV2V-H: Please refer to [Huggingface Hub](https://huggingface.co/datasets/yifanlu/OPV2V-H) and refer to [Downloading datasets](https://huggingface.co/docs/hub/datasets-downloading) tutorial for the usage.
+- DAIR-V2X-C: Download the data from [this page](https://thudair.baai.ac.cn/index). We use complemented annotation, so please also follow the instruction of [this page](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/). 
+
+It is recommended that you download **V2X-Real** and try them first. Please refer to the original github issues if you have trouble downloading **OPV2V** and **DAIR-V2X-C**.
 
 ## Installation
 
@@ -69,6 +76,9 @@ python opencood/utils/setup.py build_ext --inplace
 - [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md)
 - [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
 - [Tutorial of PTQ on V2X-Real dataset](docs/Tutorial_V2X-Real_PTQ.md)
+- [Tutorial of Training and Inference on other datasets](docs/Tutorial_Other_Datasets.md)
+
+We welcome the integration of other datasets from the community. Please submit a pull request for potential codebase integration.
 
 ## Acknowledgement
 The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-Real](https://github.com/ucla-mobility/V2X-Real).
