@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
-# License: TDG-Attribution-NonCommercial-NoDistrib
+# Author: Seth Z. Zhao <sethzhao506@g.ucla.edu>
+# License: Academic Software License: © 2021 UCLA Mobility Lab (“Institution”).
 
 from os.path import dirname, realpath
 from setuptools import setup, find_packages, Distribution
@@ -18,11 +18,11 @@ setup(
     name='OpenCOOD',
     version=__version__,
     packages=find_packages(),
-    license='MIT',
-    author='Yifan Lu',
-    author_email='yifan_lu@sjtu.edu.cn',
-    description='An opensource pytorch framework for autonomous driving '
-                'cooperative detection',
+    license='Academic Software License: © 2021 UCLA Mobility Lab (“Institution”)',
+    author='Seth Z. Zhao',
+    author_email='sethzhao506@g.ucla.edu',
+    description='An open-source pytorch multi-agent system '
+                'cooperative perception',
     long_description=open("README.md").read(),
     install_requires=[],
 )
