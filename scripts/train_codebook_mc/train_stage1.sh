@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python ./opencood/tools/train.py -y ./opencood/hypes_yaml/v2x_real/Codebook/stage1/lidar_pyramid_stage1.yaml

@@ -18,7 +18,7 @@ This work is part of our broader vision of building an __efficient and scalable 
 
 ## ✅ Currently Supported Features
 - [√] Full-Precision Baseline Training and Inference on V2X-Real Dataset, covering the original functionality of [V2X-Real](https://github.com/ucla-mobility/V2X-Real) codebase.
-- [TODO] Codebook Learning Training and Inference Pipeline.
+- [√] Codebook Learning Training and Inference Pipeline.
 - [TODO] Quantization Pipeline.
 - [TODO] TensorRT Deployment Pipeline.
 - [TODO] Support on OPV2V(-H) and DAIR-V2X datasets.
@@ -66,7 +66,8 @@ python opencood/utils/setup.py build_ext --inplace
 ```
 
 ## Tutorials
-- [Tutorial of Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real.md)
+- [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md)
+- [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
 
 ## Acknowledgement
 The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-Real](https://github.com/ucla-mobility/V2X-Real).

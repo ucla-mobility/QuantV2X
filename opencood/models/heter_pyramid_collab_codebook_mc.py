@@ -26,7 +26,6 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
         super(HeterPyramidCollabCodebookMC, self).__init__(args)
         self.channel = 64
         
-        # This is because I was using two different structures for the yaml and the args, can be cleaned up and standardized
         if 'codebook' in args:
             self.seg_num = args['codebook']['seg_num']
             self.dict_size = [args['codebook']['dict_size']] * 3

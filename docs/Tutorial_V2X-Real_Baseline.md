@@ -1,4 +1,4 @@
-# Basic Train / Test Command on Running on V2X-Real dataset
+# Basic Train / Test Command on Running Baselines on V2X-Real dataset
 
 Since V2X-Real utilizes multi-class predictions, the exact commands would be slightly different from running on OPV2V and DAIR-V2X. These training and testing instructions apply to all end-to-end training methods. Note that we adopt HEAL as the codebase structure and currently we only feature collaboration base training.
 
