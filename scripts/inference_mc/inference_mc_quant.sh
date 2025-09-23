@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python ./opencood/tools/inference_mc_quant.py --model_dir opencood/logs/your_logs --fusion_method intermediate --num_cali_batches 16 --n_bits_w 8 --n_bits_a 8 --iters_w 5000

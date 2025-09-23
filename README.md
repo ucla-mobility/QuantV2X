@@ -19,9 +19,9 @@ This work is part of our broader vision of building an __efficient and scalable 
 ## ✅ Currently Supported Features
 - [√] Full-Precision Baseline Training and Inference on V2X-Real Dataset, covering the original functionality of [V2X-Real](https://github.com/ucla-mobility/V2X-Real) codebase.
 - [√] Codebook Learning Training and Inference Pipeline.
-- [TODO] Quantization Pipeline.
-- [TODO] TensorRT Deployment Pipeline.
+- [√] Post-Training Quantization (PTQ) Pipeline.
 - [TODO] Support on OPV2V(-H) and DAIR-V2X datasets.
+- [TODO] TensorRT Deployment Pipeline.
 
 ## Data Download
 
@@ -68,6 +68,7 @@ python opencood/utils/setup.py build_ext --inplace
 ## Tutorials
 - [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md)
 - [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
+- [Tutorial of PTQ on V2X-Real dataset](docs/Tutorial_V2X-Real_PTQ.md)
 
 ## Acknowledgement
 The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-Real](https://github.com/ucla-mobility/V2X-Real).
@@ -76,10 +77,10 @@ The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-
 If you find this repository useful for your research, please consider giving us a star 🌟 and citing our paper.
  ```bibtex
 @article{zhao2025quantv2x,
- title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception},
- author={Zhao, Seth Z and Zhang, Huizhi and Li, Zhaowei and Peng, Juntong and Chui, Anthony and Zhou, Zewei and Meng, Zonglin and Xiang, Hao and Huang, Zhiyu and Wang, Fujia and others},
- journal={arXiv preprint arXiv:2509.03704},
- year={2025}
+  title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception},
+  author={Zhao, Seth Z and Zhang, Huizhi and Li, Zhaowei and Peng, Juntong and Chui, Anthony and Zhou, Zewei and Meng, Zonglin and Xiang, Hao and Huang, Zhiyu and Wang, Fujia and others},
+  journal={arXiv preprint arXiv:2509.03704},
+  year={2025}
 }
 ```
 

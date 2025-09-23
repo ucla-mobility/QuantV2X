@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=1,2 python -m torch.distributed.launch  --nproc_per_node=2 --use_env --master_port=12347 opencood/tools/train_ddp.py -y opencood/hypes_yaml/v2x_real/LiDAROnly/lidar_pyramid.yaml
+CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch  --nproc_per_node=2 --use_env --master_port=12347 opencood/tools/train_ddp.py -y opencood/hypes_yaml/v2x_real/LiDAROnly/lidar_pyramid.yaml

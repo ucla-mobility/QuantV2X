@@ -1,6 +1,6 @@
-# Basic Train / Test Command on Codebook Learning on V2X-Real dataset
+# Tutorials on Codebook Learning on V2X-Real dataset
 
-Please refer to [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md) before reading this documentation. Codebook learning involves three stages: (i) full-precision pretraining, where we train a full-precision model that serves as the foundation for codebook learning; (ii) codebook-only training, where we randomly initialize codebook and only update the codebook features based on pretrained models and freeze other model parameters; (iii) codebook co-training, where we tune the whole pipeline to achieve best perception performance.
+Please refer to [Tutorial of Baseline Training and Inference on V2X-Real dataset](./Tutorial_V2X-Real_Baseline.md) and before reading this documentation. Codebook learning involves three stages: (i) full-precision pretraining, where we train a full-precision model that serves as the foundation for codebook learning; (ii) codebook-only training, where we randomly initialize codebook and only update the codebook features based on pretrained models and freeze other model parameters; (iii) codebook co-training, where we tune the whole pipeline to achieve best perception performance.
 
 ### Stage 1: Train the full-precision model
 

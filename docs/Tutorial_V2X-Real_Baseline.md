@@ -1,4 +1,4 @@
-# Basic Train / Test Command on Running Baselines on V2X-Real dataset
+# Tutorial on Training and Testing Baselines on V2X-Real dataset
 
 Since V2X-Real utilizes multi-class predictions, the exact commands would be slightly different from running on OPV2V and DAIR-V2X. These training and testing instructions apply to all end-to-end training methods. Note that we adopt HEAL as the codebase structure and currently we only feature collaboration base training.
 
@@ -41,4 +41,4 @@ python opencood/tools/inference_mc.py --model_dir ${CHECKPOINT_FOLDER} [--fusion
   - **intermediate**: intermediate fusion detection from all agents, all agents' fused gt box. _[only for intermediate fusion dataset]_
 
 ### Notes:
-- You could refer to `/scripts` folder to for example running scripts. `mc` stands for `multi-class`, which differentiates itself from `single-class` training and inference.
+- You could refer to `/scripts` folder to for example running scripts. `mc` stands for `multi-class`, which differentiates itself from `single-class` training and inference. `/scripts/inference_mc/inference_mc_fp.sh` refers to full-precision inference that is differentiated with `/scripts/inference_mc/inference_mc_quant.sh` which involves a post-training quantization (PTQ) stage.

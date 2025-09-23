@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=4 python ./opencood/tools/inference_mc.py --fusion_method intermediate --model_dir opencood/logs/your_logs --save_vis_interval 40
+CUDA_VISIBLE_DEVICES=0 python ./opencood/tools/inference_mc.py --fusion_method intermediate --model_dir opencood/logs/your_logs --save_vis_interval 40
