@@ -21,7 +21,7 @@ setup(
     license='Academic Software License: © 2021 UCLA Mobility Lab (“Institution”)',
     author='Seth Z. Zhao',
     author_email='sethzhao506@g.ucla.edu',
-    description='An open-source pytorch multi-agent system '
+    description='An open-source pytorch multi-agent system for autonomous driving '
                 'cooperative perception',
     long_description=open("README.md").read(),
     install_requires=[],
