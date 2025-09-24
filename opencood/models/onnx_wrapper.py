@@ -1,21 +1,21 @@
-# -*- coding: utf-8 -*-
-# Author: Zhaowei Li
-
-
 import torch
 import torch.nn as nn
 
 class OnnxWrapper(nn.Module):
     def __init__(self, model):
-        super(OnnxWrapper, self).__init__()
+        super().__init__()
         self.model = model
         self.model.eval()
-        torch.set_grad_enabled(False)  # Disable gradients for the entire instance
-    
+        torch.set_grad_enabled(False)
+
     def forward_normal(self, data_dict):
-        output = self.model(data_dict)
-        return output
+        return self.model(data_dict)
 
     def forward(self, *args):
-        output = self.model.forward_onnx_export(*args)
-        return output
+        if hasattr(self.model, 'forward_onnx_export'):
+            try:
+                return self.model.forward_onnx_export(*args)
+            except TypeError:
+                return self.model.forward_onnx_export(args)
+        else:
+            return self.model(*args)
