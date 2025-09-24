@@ -13,8 +13,8 @@ This work is part of our broader vision of building an __efficient and scalable 
 
 ## News
 - **`2025/10`**: This codebase will be featured as the main tutorial repository for [ICCV 2025 Tutorial: Beyond Self-Driving: Exploring Three Levels of Driving Automation](https://drivex-tutorial.github.io/).
-- **`2025/10`**: Codebase Release with full support on V2X-Real Dataset.
-- **`2025/09`**: [QuantV2X](http://arxiv.org/abs/2509.03704) paper release.
+- **`2025/09`**: QuantV2X is selected as **Oral Presentation** in [ICCV 2025 X-Sense Workshop](https://x-sense-ego-exo.github.io/index.html).
+- **`2025/09`**: [QuantV2X](http://arxiv.org/abs/2509.03704) paper release and initial codebase release.
 
 ## ✅ Currently Supported Features
 - [√] Full-Precision Baseline Training and Inference on V2X-Real Dataset, covering the original functionality of [V2X-Real](https://github.com/ucla-mobility/V2X-Real) codebase.
