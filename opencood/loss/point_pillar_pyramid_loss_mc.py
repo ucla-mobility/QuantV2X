@@ -5,10 +5,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from opencood.loss.point_pillar_depth_loss_mc import PointPillarDepthLoss3Class
+from opencood.loss.point_pillar_depth_loss_mc import PointPillarDepthLossMC
 from opencood.loss.point_pillar_loss import sigmoid_focal_loss
 
-class PointPillarPyramidLossMC(PointPillarDepthLoss3Class):
+class PointPillarPyramidLossMC(PointPillarDepthLossMC):
     def __init__(self, args):
         super().__init__(args)
         self.pyramid = args['pyramid']

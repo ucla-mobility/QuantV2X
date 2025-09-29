@@ -5,9 +5,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from opencood.loss.point_pillar_loss_mc import PointPillarLoss3Class
+from opencood.loss.point_pillar_loss_mc import PointPillarLossMC
 
-class PointPillarDepthLoss3Class(PointPillarLoss3Class): # change to PointPillarLoss3Class when using v2xreal
+class PointPillarDepthLossMC(PointPillarLossMC): 
     def __init__(self, args):
         super().__init__(args)
         self.depth = args['depth']

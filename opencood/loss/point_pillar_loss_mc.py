@@ -73,9 +73,9 @@ class WeightedSmoothL1Loss(nn.Module):
         return loss
 
 
-class PointPillarLoss3Class(nn.Module):
+class PointPillarLossMC(nn.Module):
     def __init__(self, args):
-        super(PointPillarLoss3Class, self).__init__()
+        super(PointPillarLossMC, self).__init__()
         self.reg_loss_func = WeightedSmoothL1Loss()
         self.alpha = 0.25
         self.gamma = 2.0
