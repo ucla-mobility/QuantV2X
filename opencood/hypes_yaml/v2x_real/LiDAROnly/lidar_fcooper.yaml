@@ -160,7 +160,7 @@ model:
         dim: [256]
         input_dim: 384
 
-    fusion_method: fcooper
+    fusion_method: max
     in_head: 256
     anchor_number: *anchor_num
     dir_args: *dir_args
