@@ -77,6 +77,7 @@ python opencood/utils/setup.py build_ext --inplace
 - [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
 - [Tutorial of PTQ on V2X-Real dataset](docs/Tutorial_V2X-Real_PTQ.md)
 - [Tutorial of Training and Inference on other datasets](docs/Tutorial_Other_Datasets.md)
+- [Tutorial of TensorRT Export](docs/Tutorial_Tensorrt_Export.md)
 
 We welcome the integration of other datasets from the community. Please submit a pull request for potential codebase integration.
 
