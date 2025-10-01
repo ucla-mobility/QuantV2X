@@ -1,0 +1,24 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test & tooling caches
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.cache/
+.coverage
+htmlcov/
+
+# Misc
+.ipynb_checkpoints/
+.DS_Store
+logs/

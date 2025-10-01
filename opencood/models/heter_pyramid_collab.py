@@ -236,6 +236,17 @@ class HeterPyramidCollab(nn.Module):
 
         return output_dict
 
+    def get_memory_footprint(self):
+            """Calculate the total memory footprint of the model's parameters and buffers."""
+            total_size = 0
+            for param in self.parameters():
+                total_size += param.nelement() * param.element_size()
+            for buffer in self.buffers():
+                total_size += buffer.nelement() * buffer.element_size()
+
+            total_size_MB = total_size / (1024 ** 2)  # Convert to MB
+            return f"Model Memory Footprint: {total_size_MB:.2f} MB"
+
     def forward_onnx_export(self,
                             voxel_features,
                             voxel_coords,
