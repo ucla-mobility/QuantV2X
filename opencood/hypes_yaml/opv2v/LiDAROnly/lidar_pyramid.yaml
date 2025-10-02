@@ -1,7 +1,7 @@
 name: HeterBaseline_opv2v_lidar_pyramid 
-root_dir: "/data4/dataset/OPV2V/train"
-validate_dir: "/data4/dataset/OPV2V/validate"
-test_dir: "/data4/dataset/OPV2V/test"
+root_dir: "dataset/OPV2V/train"
+validate_dir: "dataset/OPV2V/validate"
+test_dir: "dataset/OPV2V/test"
 
 yaml_parser: "load_general_params"
 train_params:

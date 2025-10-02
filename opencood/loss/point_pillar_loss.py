@@ -166,7 +166,7 @@ class PointPillarLoss(nn.Module):
 
 
 
-    def logging(self, epoch, batch_id, batch_len, writer = None, suffix=""):
+    def logging(self, epoch, batch_id, batch_len, writer = None, suffix="", pbar=None):
         """
         Print out  the loss function for current iteration.
 
@@ -188,10 +188,17 @@ class PointPillarLoss(nn.Module):
         iou_loss = self.loss_dict.get('iou_loss', 0)
 
 
-        print("[epoch %d][%d/%d]%s || Loss: %.4f || Conf Loss: %.4f"
-              " || Loc Loss: %.4f || Dir Loss: %.4f || IoU Loss: %.4f" % (
-                  epoch, batch_id + 1, batch_len, suffix,
-                  total_loss, cls_loss, reg_loss, dir_loss, iou_loss))
+        if pbar is None:
+            print("[epoch %d][%d/%d]%s || Loss: %.4f || Conf Loss: %.4f"
+                " || Loc Loss: %.4f || Dir Loss: %.4f || IoU Loss: %.4f" % (
+                    epoch, batch_id + 1, batch_len, suffix,
+                    total_loss, cls_loss, reg_loss, dir_loss, iou_loss))
+        else:
+            pbar.set_description("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f"
+                  " || Loc Loss: %.4f" % (
+                      epoch, batch_id + 1, batch_len,
+                      total_loss, cls_loss, reg_loss))
+
 
         if not writer is None:
             writer.add_scalar('Regression_loss'+suffix, reg_loss,

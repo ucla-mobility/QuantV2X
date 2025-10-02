@@ -117,6 +117,7 @@ model:
 
     fusion_backbone: 
       resnext: true
+      stage: collab
       layer_nums: [3, 5, 8]
       layer_strides: [1, 2, 2]
       num_filters: [64, 128, 256]
