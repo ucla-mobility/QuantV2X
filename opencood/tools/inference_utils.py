@@ -216,8 +216,8 @@ def inference_intermediate_fusion(batch_data, model, dataset):
         The tensor of gt bounding box.
     """
 
-    if hasattr(model, 'model') and hasattr(model.model, 'forward_onnx_export'):
-        batch_data['ego']['onnx_export'] = True
+    # if hasattr(model, 'model') and hasattr(model.model, 'forward_onnx_export'):
+    #     batch_data['ego']['onnx_export'] = True
     
     # Call the early fusion function
     return_dict = inference_early_fusion(batch_data, model, dataset)
