@@ -21,7 +21,7 @@ This work is part of our broader vision of building an __efficient and scalable 
 - [√] Codebook Learning Training and Inference Pipeline.
 - [√] Post-Training Quantization (PTQ) Pipeline.
 - [√] Support on OPV2V(-H) and DAIR-V2X datasets.
-- [TODO] TensorRT Deployment Pipeline.
+- [√] TensorRT Deployment Pipeline.
 
 ## V2X-Real Data Download
 
