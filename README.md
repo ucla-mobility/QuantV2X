@@ -10,6 +10,8 @@ This is the official implementation of "QuantV2X: A Fully Quantized Multi-Agent 
 
 This work is part of our broader vision of building an __efficient and scalable V2X ecosystem__, comprising data-efficient pretraining with [CooPre](https://arxiv.org/pdf/2408.11241), training-efficient multi-agent learning with [TurboTrain](https://arxiv.org/pdf/2508.04682), and inference-efficient cooperative perception with [QuantV2X](http://arxiv.org/abs/2509.03704).
 
+## ICCV 2025 DriveX Tutorials
+- [Notebook Tutorial](docs/notebook/QuantV2X_DriveX_Tutorial.ipynb)
 
 ## News
 - **`2025/10`**: This codebase will be featured as the main tutorial repository for [ICCV 2025 Tutorial: Beyond Self-Driving: Exploring Three Levels of Driving Automation](https://drivex-tutorial.github.io/).
