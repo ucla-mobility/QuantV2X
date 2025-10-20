@@ -12,7 +12,7 @@ from opencood.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbo
 from opencood.models.sub_modules.feature_alignnet import AlignNet
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
 from opencood.models.sub_modules.naive_compress import NaiveCompressor
-from opencood.models.fuse_modules.pyramid_fuse import PyramidFusion
+#from opencood.models.fuse_modules.pyramid_fuse import PyramidFusion
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 from opencood.utils.model_utils import check_trainable_module, fix_bn, unfix_bn
 from opencood.tools import onnx_export_utils
@@ -96,8 +96,14 @@ class HeterPyramidCollabMC(nn.Module):
         """
         Fusion, by default multiscale fusion: 
         Note the input of PyramidFusion has downsampled 2x. (SECOND required)
-        """
-        self.pyramid_backbone = PyramidFusion(args['fusion_backbone'])
+        """        
+        fusion_args = args['fusion_backbone']
+        if fusion_args.get("proj_first", False):
+            from opencood.models.fuse_modules.pyramid_fuse_onnx import PyramidFusion
+        else:
+            from opencood.models.fuse_modules.pyramid_fuse import PyramidFusion
+
+        self.pyramid_backbone = PyramidFusion(fusion_args)
 
         """
         Shrink header

@@ -85,7 +85,14 @@ class HeterPyramidCollab(nn.Module):
         Fusion, by default multiscale fusion: 
         Note the input of PyramidFusion has downsampled 2x. (SECOND required)
         """
-        self.pyramid_backbone = PyramidFusion(args['fusion_backbone'])
+        
+        fusion_args = args['fusion_backbone']
+        if fusion_args.get("proj_first", False):
+            from opencood.models.fuse_modules.pyramid_fuse_onnx import PyramidFusion
+        else:
+            from opencood.models.fuse_modules.pyramid_fuse import PyramidFusion
+
+        self.pyramid_backbone = PyramidFusion(fusion_args)
 
 
         """
