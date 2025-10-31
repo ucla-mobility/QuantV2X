@@ -181,12 +181,14 @@ class VoxelPostprocessor(BasePostprocessor):
         targets[index_x, index_y, np.array(index_z) * 7 + 2] = \
             (gt_box_center[id_pos_gt, 2] - anchors[id_pos, 2]) / anchors[
                 id_pos, 3]
+        # Add epsilon to avoid log(0) or log(negative) and clamp ratios to valid range
+        eps = 1e-7
         targets[index_x, index_y, np.array(index_z) * 7 + 3] = np.log(
-            gt_box_center[id_pos_gt, 3] / anchors[id_pos, 3])
+            np.maximum(gt_box_center[id_pos_gt, 3] / np.maximum(anchors[id_pos, 3], eps), eps))
         targets[index_x, index_y, np.array(index_z) * 7 + 4] = np.log(
-            gt_box_center[id_pos_gt, 4] / anchors[id_pos, 4])
+            np.maximum(gt_box_center[id_pos_gt, 4] / np.maximum(anchors[id_pos, 4], eps), eps))
         targets[index_x, index_y, np.array(index_z) * 7 + 5] = np.log(
-            gt_box_center[id_pos_gt, 5] / anchors[id_pos, 5])
+            np.maximum(gt_box_center[id_pos_gt, 5] / np.maximum(anchors[id_pos, 5], eps), eps))
         targets[index_x, index_y, np.array(index_z) * 7 + 6] = (
                 gt_box_center[id_pos_gt, 6] - anchors[id_pos, 6])
 

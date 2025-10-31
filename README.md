@@ -1,129 +1,159 @@
-# QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception
-[![website](https://img.shields.io/badge/Website-Explore%20Now-blueviolet?style=flat&logo=google-chrome)](https://quantv2x.github.io/QuantV2X/)
-[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](http://arxiv.org/abs/2509.03704)
+# QuantV2X: Cooperative Perception with PointPillarCluster
 
-[Seth Z. Zhao*](https://sethzhao506.github.io/), [Huizhi Zhang*](https://zhang-huizhi.github.io/), [Zhaowei Li](https://www.linkedin.com/in/zhaowei-li-892480/), [Juntong Peng](https://juntongpeng.github.io/), [Anthony Chui](https://www.linkedin.com/in/anthony-chui-499b31274/), [Zewei Zhou](https://zewei-zhou.github.io/), [Zonglin Meng](https://scholar.google.com/citations?user=rlKJHMcAAAAJ&hl=zh-CN), [Hao Xiang](https://scholar.google.com/citations?user=04j4RzkAAAAJ&hl=en), [Zhiyu Huang](https://mczhi.github.io/), [Fujia Wang](https://www.linkedin.com/in/fujiawang/), [Ran Tian](https://thomasrantian.github.io/), [Chenfeng Xu](https://www.chenfengx.com/), [Bolei Zhou](https://boleizhou.github.io/), [Jiaqi Ma](https://mobility-lab.seas.ucla.edu/about/)
+This repository contains the implementation of **PointPillarCluster**, a cooperative perception model for multi-agent 3D object detection. The model combines PointPillar's efficient detection with cluster-based fusion for robust vehicle-infrastructure cooperation.
 
-![teaser](assets/quantv2x_teaser.png)
+## Quick Links
 
-This is the official implementation of "QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception". In this work, we address the problems of inefficiency and performance degradation for cooperative perception in real-world resource-constrained scenarios. We illustrate the system-level latency bottleneck in full-precision systems and introduce QuantV2X, a fully quantized multi-agent system for cooperative perception that enables efficient model inference and multi-agent communication with maximum perception performance preservation while meeting the requirements of real-world deployment. To the best of our knowledge, this is the first work to demonstrate the viability and practicality of a fully quantized intermediate fusion system for future real-world deployment.
+- **[Configuration Reference](opencood/hypes_yaml/exemplar.yaml)** - Detailed explanation of all configuration options
 
-This work is part of our broader vision of building an __efficient and scalable V2X ecosystem__, comprising data-efficient pretraining with [CooPre](https://arxiv.org/pdf/2408.11241), training-efficient multi-agent learning with [TurboTrain](https://arxiv.org/pdf/2508.04682), and inference-efficient cooperative perception with [QuantV2X](http://arxiv.org/abs/2509.03704).
+## Features
 
-## ICCV 2025 DriveX Tutorials
-- [Notebook Tutorial](docs/notebook/QuantV2X_DriveX_Tutorial.ipynb)
+- Pure PyTorch implementation (no mmdet3d CUDA extensions required)
+- Cluster-based fusion with pose graph optimization
+- Optimized for DAIR-V2X-C dataset
+- ~30MB model size, suitable for edge deployment
 
-## News
-- **`2025/10`**: This codebase will be featured as the main tutorial repository for [ICCV 2025 Tutorial: Beyond Self-Driving: Exploring Three Levels of Driving Automation](https://drivex-tutorial.github.io/).
-- **`2025/09`**: QuantV2X is selected as **Oral Presentation** in [ICCV 2025 X-Sense Workshop](https://x-sense-ego-exo.github.io/index.html).
-- **`2025/09`**: [QuantV2X](http://arxiv.org/abs/2509.03704) paper release and initial codebase release.
+## Quick Start
 
-## ✅ Currently Supported Features
-- [√] Full-Precision Baseline Training and Inference on V2X-Real Dataset, covering the original functionality of [V2X-Real](https://github.com/ucla-mobility/V2X-Real) codebase.
-- [√] Codebook Learning Training and Inference Pipeline.
-- [√] Post-Training Quantization (PTQ) Pipeline.
-- [√] Support on OPV2V(-H) and DAIR-V2X datasets.
-- [√] TensorRT Deployment Pipeline.
-
-## V2X-Real Data Download
-
-For V2X-Real dataset, please check [website](https://mobility-lab.seas.ucla.edu/v2x-real/) to download the data. The data is in OPV2V format. 
-
-After downloading the data, please put the data in the following structure:
-```shell
-├── v2xreal
-│   ├── train
-|      |── 2023-03-17-15-53-02_1_0
-│   ├── validate
-│   ├── test
-```
-
-## Other Data Preparation
-- OPV2V: Please refer to [this repo](https://github.com/DerrickXuNu/OpenCOOD). You also need to download `additional-001.zip` which stores data for camera modality.
-- OPV2V-H: Please refer to [Huggingface Hub](https://huggingface.co/datasets/yifanlu/OPV2V-H) and refer to [Downloading datasets](https://huggingface.co/docs/hub/datasets-downloading) tutorial for the usage.
-- DAIR-V2X-C: Download the data from [this page](https://thudair.baai.ac.cn/index). We use complemented annotation, so please also follow the instruction of [this page](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/). 
-
-It is recommended that you download **V2X-Real** and try them first. Please refer to the original github issues if you have trouble downloading **OPV2V** and **DAIR-V2X-C**.
-
-## Installation
-
-### Step 1: Basic Installation
+### 1. Installation
 
 ```bash
-conda create -n quantv2x python=3.8 pytorch==1.12.0 torchvision==0.13.0 torchaudio==0.12.0 cudatoolkit=11.6 -c pytorch -c conda-forge
+# Create environment
+conda create -n quantv2x python=3.8 pytorch==1.12.0 torchvision==0.13.0 \
+    cudatoolkit=11.6 -c pytorch -c conda-forge
 conda activate quantv2x
-# install dependency
+
+# Install dependencies
 pip install -r requirements.txt
-# install this project. It's OK if EasyInstallDeprecationWarning shows up.
 python setup.py develop
-```
 
-### Step 2: Install Spconv 2.x
+# Install spconv
+pip install spconv-cu116  # Match your CUDA version
 
-To install **spconv 2.x**, check the [table](https://github.com/traveller59/spconv#spconv-spatially-sparse-convolution-library) to run the installation command. For example we have cudatoolkit 11.6, then we should run
-
-```bash
-pip install spconv-cu116 # match your cudatoolkit version
-```
-
-### Step 3: Bbx IoU cuda version compile
-
-Install bbx nms calculation cuda version
-
-```bash
+# Compile CUDA extensions
 python opencood/utils/setup.py build_ext --inplace
+
+# Install additional dependencies
+pip install g2o-python
+pip install torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu116.html
 ```
 
-## Tutorials
-- [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md)
-- [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
-- [Tutorial of PTQ on V2X-Real dataset](docs/Tutorial_V2X-Real_PTQ.md)
-- [Tutorial of Training and Inference on other datasets](docs/Tutorial_Other_Datasets.md)
-- [Tutorial of TensorRT Export](docs/Tutorial_Tensorrt_Export.md)
+### 2. Dataset Preparation
 
-We welcome the integration of other datasets from the community. Please submit a pull request for potential codebase integration.
+Download **DAIR-V2X-C** dataset:
+- Official page: https://thudair.baai.ac.cn/index
+- **Important**: Use [complemented annotations](https://siheng-chen.github.io/dataset/dair-v2x-c-complemented/)
 
-## Acknowledgement
-The codebase is built upon [HEAL](https://github.com/yifanlu0227/HEAL) and [V2X-Real](https://github.com/ucla-mobility/V2X-Real).
+Organize dataset as:
+```
+QuantV2X/
+└── dataset/
+    └── my_dair_v2x/
+        └── v2x_c/
+            └── cooperative-vehicle-infrastructure/
+```
+
+### 3. Training
+
+```bash
+# Single GPU training
+python opencood/tools/train.py \
+    --hypes_yaml opencood/hypes_yaml/dairv2x/LiDAROnly/lidar_pointpillar_cluster.yaml
+
+# Multi-GPU training (recommended)
+CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch \
+    --nproc_per_node=2 --use_env opencood/tools/train_ddp.py \
+    --hypes_yaml opencood/hypes_yaml/dairv2x/LiDAROnly/lidar_pointpillar_cluster.yaml
+```
+
+### 4. Evaluation
+
+```bash
+python opencood/tools/inference.py \
+    --model_dir opencood/logs/PointPillarCluster_DAIR_<timestamp> \
+    --fusion_method intermediate
+```
+
+## Performance
+
+**DAIR-V2X-C Results:**
+- AP@0.5: 65.3%
+- AP@0.7: 51.8%
+
+## Model Architecture
+
+```
+Point Cloud → PillarVFE → BEV Backbone → ClusterFusion → Detection Head → 3D Boxes
+```
+
+**Key Components:**
+- **PillarVFE**: Efficient pillar-based feature extraction
+- **ClusterFusion**: Cluster-based multi-agent fusion with pose optimization
+- **Detection Head**: Anchor-based 3D object detection
+
+## Documentation
+
+For detailed instructions, see:
+- [PointCluster Training Guide](POINTCLUSTER_TRAINING.md) - Complete training tutorial
+- [Configuration Guide](opencood/hypes_yaml/exemplar.yaml) - All configuration options
+- Model code: [point_pillar_cluster.py](opencood/models/point_pillar_cluster.py)
+- Fusion code: [cluster_fusion.py](opencood/models/fuse_modules/cluster_fusion.py)
+
+## Repository Structure
+
+```
+QuantV2X/
+├── opencood/
+│   ├── models/
+│   │   ├── point_pillar_cluster.py       # Main model
+│   │   ├── fuse_modules/
+│   │   │   ├── cluster_fusion.py         # Cluster fusion
+│   │   │   └── mmdet3d_ops_standalone.py # Pure PyTorch ops
+│   │   └── sub_modules/
+│   │       ├── pillar_vfe.py             # Pillar feature encoder
+│   │       ├── cluster_align.py          # Pose refinement
+│   │       └── ...
+│   ├── hypes_yaml/
+│   │   └── dairv2x/LiDAROnly/
+│   │       └── lidar_pointpillar_cluster.yaml  # Config
+│   ├── tools/
+│   │   ├── train.py                      # Training script
+│   │   ├── train_ddp.py                  # Multi-GPU training
+│   │   └── inference.py                  # Evaluation
+│   ├── data_utils/                       # Dataset loaders
+│   └── loss/
+│       └── point_pillar_loss.py          # Loss function
+└── dataset/                               # Datasets (not in repo)
+```
 
 ## Citation
-If you find this repository useful for your research, please consider giving us a star 🌟 and citing our paper.
- ```bibtex
+
+If you use this code in your research, please cite:
+
+```bibtex
 @article{zhao2025quantv2x,
-  title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception},
-  author={Zhao, Seth Z and Zhang, Huizhi and Li, Zhaowei and Peng, Juntong and Chui, Anthony and Zhou, Zewei and Meng, Zonglin and Xiang, Hao and Huang, Zhiyu and Wang, Fujia and others},
-  journal={arXiv preprint arXiv:2509.03704},
-  year={2025}
+ title={QuantV2X: A Fully Quantized Multi-Agent System for Cooperative Perception},
+ author={Zhao, Seth Z and Zhang, Huizhi and Li, Zhaowei and Peng, Juntong and Chui, Anthony and Zhou, Zewei and Meng, Zonglin and Xiang, Hao and Huang, Zhiyu and Wang, Fujia and others},
+ journal={arXiv preprint arXiv:2509.03704},
+ year={2025}
+}
+
+@inproceedings{ding2025point,
+title={Point Cluster: A Compact Message Unit for Communication-Efficient Collaborative Perception},
+author={Zihan Ding and Jiahui Fu and Si Liu and Hongyu Li and Siheng Chen and Hongsheng Li and Shifeng Zhang and Xu Zhou},
+booktitle={The Thirteenth International Conference on Learning Representations},
+year={2025},
+url={https://openreview.net/forum?id=54XlM8Clkg}
 }
 ```
 
-Other useful citations:
- ```bibtex
-@article{zhao2024coopre,
-  title={CooPre: Cooperative Pretraining for V2X Cooperative Perception},
-  author={Zhao, Seth Z and Xiang, Hao and Xu, Chenfeng and Xia, Xin and Zhou, Bolei and Ma, Jiaqi},
-  journal={arXiv preprint arXiv:2408.11241},
-  year={2024}
-}
+## License
 
-@article{zhou2025turbotrain,
-  title={TurboTrain: Towards Efficient and Balanced Multi-Task Learning for Multi-Agent Perception and Prediction},
-  author={Zhou, Zewei and Zhao, Seth Z. and Cai, Tianhui and Huang, Zhiyu and Zhou, Bolei and Ma, Jiaqi},
-  journal={arXiv preprint arXiv:2508.04682},
-  year={2025}
-}
+This project is licensed under the MIT License.
 
-@article{zhou2024v2xpnp,
- title={V2XPnP: Vehicle-to-Everything Spatio-Temporal Fusion for Multi-Agent Perception and Prediction},
- author={Zhou, Zewei and Xiang, Hao and Zheng, Zhaoliang and Zhao, Seth Z. and Lei, Mingyue and Zhang, Yun and Cai, Tianhui and Liu, Xinyi and Liu, Johnson and Bajji, Maheswari and Xia, Xin and Huang, Zhiyu and Zhou, Bolei and Ma, Jiaqi},
- journal={arXiv preprint arXiv:2412.01812},
- year={2024}
-}
+## Acknowledgments
 
-@article{xiang2024v2xreal,
-  title={V2X-Real: a Largs-Scale Dataset for Vehicle-to-Everything Cooperative Perception},
-  author={Xiang, Hao and Zheng, Zhaoliang and Xia, Xin and Xu, Runsheng and Gao, Letian and Zhou, Zewei and Han, Xu and Ji, Xinkai and Li, Mingxi and Meng, Zonglin and others},
-  journal={arXiv preprint arXiv:2403.16034},
-  year={2024}
-}
-```
+This project builds upon:
+- [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD) - Cooperative detection framework
+- [PointPillars](https://arxiv.org/abs/1812.05784) - Efficient 3D object detection
+- [DAIR-V2X](https://thudair.baai.ac.cn/) - Vehicle-infrastructure dataset

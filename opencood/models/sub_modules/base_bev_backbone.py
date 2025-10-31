@@ -1,152 +1,184 @@
+# -*- coding: utf-8 -*-
+# Author: Runsheng Xu <rxx3386@ucla.edu>, OpenPCDet
+# License: TDG-Attribution-NonCommercial-NoDistrib
+
+"""
+Transform points to voxels using sparse conv library
+"""
+import sys
+
 import numpy as np
 import torch
-import torch.nn as nn
+from icecream import ic
+
+from opencood.data_utils.pre_processor.base_preprocessor import \
+    BasePreprocessor
 
 
-class BaseBEVBackbone(nn.Module):
-    def __init__(self, model_cfg, input_channels):
-        super().__init__()
-        self.model_cfg = model_cfg
+class SpVoxelPreprocessor(BasePreprocessor):
+    def __init__(self, preprocess_params, train):
+        super(SpVoxelPreprocessor, self).__init__(preprocess_params,
+                                                  train)
+        self.spconv = 1
+        try:
+            # spconv v1.x
+            from spconv.utils import VoxelGeneratorV2 as VoxelGenerator
+        except:
+            # spconv v2.x
+            from cumm import tensorview as tv
+            from spconv.utils import Point2VoxelCPU3d as VoxelGenerator
+            self.tv = tv
+            self.spconv = 2
+        self.lidar_range = self.params['cav_lidar_range']
+        self.voxel_size = self.params['args']['voxel_size']
+        self.max_points_per_voxel = self.params['args']['max_points_per_voxel']
 
-        if 'layer_nums' in self.model_cfg:
-
-            assert len(self.model_cfg['layer_nums']) == \
-                   len(self.model_cfg['layer_strides']) == \
-                   len(self.model_cfg['num_filters'])
-
-            layer_nums = self.model_cfg['layer_nums']
-            layer_strides = self.model_cfg['layer_strides']
-            num_filters = self.model_cfg['num_filters']
+        if train:
+            self.max_voxels = self.params['args']['max_voxel_train']
         else:
-            layer_nums = layer_strides = num_filters = []
+            self.max_voxels = self.params['args']['max_voxel_test']
 
-        if 'upsample_strides' in self.model_cfg:
-            assert len(self.model_cfg['upsample_strides']) \
-                   == len(self.model_cfg['num_upsample_filter'])
+        grid_size = (np.array(self.lidar_range[3:6]) -
+                     np.array(self.lidar_range[0:3])) / np.array(self.voxel_size)
+        self.grid_size = np.round(grid_size).astype(np.int64)
 
-            num_upsample_filters = self.model_cfg['num_upsample_filter']
-            upsample_strides = self.model_cfg['upsample_strides']
-
+        # use sparse conv library to generate voxel
+        if self.spconv == 1:
+            self.voxel_generator = VoxelGenerator(
+                voxel_size=self.voxel_size,
+                point_cloud_range=self.lidar_range,
+                max_num_points=self.max_points_per_voxel,
+                max_voxels=self.max_voxels
+            )
         else:
-            upsample_strides = num_upsample_filters = []
+            self.voxel_generator = VoxelGenerator(
+                vsize_xyz=self.voxel_size,
+                coors_range_xyz=self.lidar_range,
+                max_num_points_per_voxel=self.max_points_per_voxel,
+                num_point_features=4,
+                max_num_voxels=self.max_voxels
+            )
 
-        num_levels = len(layer_nums)
-        self.num_levels = num_levels
-        c_in_list = [input_channels, *num_filters[:-1]]
+    def preprocess(self, pcd_np):
+        data_dict = {}
+        if self.spconv == 1:
+            voxel_output = self.voxel_generator.generate(pcd_np)
+        else:
+            pcd_tv = self.tv.from_numpy(pcd_np)
+            voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)
+        if isinstance(voxel_output, dict):
+            voxels, coordinates, num_points = \
+                voxel_output['voxels'], voxel_output['coordinates'], \
+                voxel_output['num_points_per_voxel']
+        else:
+            voxels, coordinates, num_points = voxel_output
 
-        self.blocks = nn.ModuleList()
-        self.deblocks = nn.ModuleList()
+        if self.spconv == 2:
+            voxels = voxels.numpy()
+            coordinates = coordinates.numpy()
+            num_points = num_points.numpy()
 
-        for idx in range(num_levels):
-            cur_layers = [
-                nn.ZeroPad2d(1),
-                nn.Conv2d(
-                    c_in_list[idx], num_filters[idx], kernel_size=3,
-                    stride=layer_strides[idx], padding=0, bias=False
-                ),
-                nn.BatchNorm2d(num_filters[idx], eps=1e-3, momentum=0.01),
-                nn.ReLU()
-            ]
-            for k in range(layer_nums[idx]):
-                cur_layers.extend([
-                    nn.Conv2d(num_filters[idx], num_filters[idx],
-                              kernel_size=3, padding=1, bias=False),
-                    nn.BatchNorm2d(num_filters[idx], eps=1e-3, momentum=0.01),
-                    nn.ReLU()
-                ])
+        data_dict['voxel_features'] = voxels
+        data_dict['voxel_coords'] = coordinates
+        data_dict['voxel_num_points'] = num_points
 
-            self.blocks.append(nn.Sequential(*cur_layers))
-            if len(upsample_strides) > 0:
-                stride = upsample_strides[idx]
-                if stride >= 1:
-                    self.deblocks.append(nn.Sequential(
-                        nn.ConvTranspose2d(
-                            num_filters[idx], num_upsample_filters[idx],
-                            upsample_strides[idx],
-                            stride=upsample_strides[idx], bias=False
-                        ),
-                        nn.BatchNorm2d(num_upsample_filters[idx],
-                                       eps=1e-3, momentum=0.01),
-                        nn.ReLU()
-                    ))
-                else:
-                    stride = np.round(1 / stride).astype(np.int)
-                    self.deblocks.append(nn.Sequential(
-                        nn.Conv2d(
-                            num_filters[idx], num_upsample_filters[idx],
-                            stride,
-                            stride=stride, bias=False
-                        ),
-                        nn.BatchNorm2d(num_upsample_filters[idx], eps=1e-3,
-                                       momentum=0.01),
-                        nn.ReLU()
-                    ))
+        return data_dict
 
-        c_in = sum(num_upsample_filters)
-        if len(upsample_strides) > num_levels:
-            self.deblocks.append(nn.Sequential(
-                nn.ConvTranspose2d(c_in, c_in, upsample_strides[-1],
-                                   stride=upsample_strides[-1], bias=False),
-                nn.BatchNorm2d(c_in, eps=1e-3, momentum=0.01),
-                nn.ReLU(),
-            ))
-
-        self.num_bev_features = c_in
-
-    def forward(self, x):
-        ups = []
-        ret_dict = {}
-
-        for i in range(len(self.blocks)):
-            x = self.blocks[i](x)
-
-            stride = int(x.shape[2] / x.shape[2])
-            ret_dict['spatial_features_%dx' % stride] = x
-
-            if len(self.deblocks) > 0:
-                ups.append(self.deblocks[i](x))
-            else:
-                ups.append(x)
-
-        if len(ups) > 1:
-            x = torch.cat(ups, dim=1)
-        elif len(ups) == 1:
-            x = ups[0]
-
-        if len(self.deblocks) > len(self.blocks):
-            x = self.deblocks[-1](x)
-
-        return x # [N,C,100,352]
-
-
-    def get_multiscale_feature(self, spatial_features):
+    def collate_batch(self, batch):
         """
-        before multiscale intermediate fusion
-        """
-        feature_list = []
-        x = spatial_features
-        for i in range(len(self.blocks)):
-            x = self.blocks[i](x)
-            feature_list.append(x)
+        Customized pytorch data loader collate function.
 
-        return feature_list
+        Parameters
+        ----------
+        batch : list or dict
+            List or dictionary.
 
-    def decode_multiscale_feature(self, x):
+        Returns
+        -------
+        processed_batch : dict
+            Updated lidar batch.
         """
-        after multiscale interemediate fusion
-        """
-        ups = []
-        for i in range(self.num_levels):
-            if len(self.deblocks) > 0:
-                ups.append(self.deblocks[i](x[i]))
-            else:
-                ups.append(x[i])
-        if len(ups) > 1:
-            x = torch.cat(ups, dim=1)
-        elif len(ups) == 1:
-            x = ups[0]
 
-        if len(self.deblocks) > self.num_levels:
-            x = self.deblocks[-1](x)
-        return x
-        
+        if isinstance(batch, list):
+            return self.collate_batch_list(batch)
+        elif isinstance(batch, dict):
+            return self.collate_batch_dict(batch)
+        else:
+            sys.exit('Batch has too be a list or a dictionarn')
+
+    @staticmethod
+    def collate_batch_list(batch):
+        """
+        Customized pytorch data loader collate function.
+
+        Parameters
+        ----------
+        batch : list
+            List of dictionary. Each dictionary represent a single frame.
+
+        Returns
+        -------
+        processed_batch : dict
+            Updated lidar batch.
+        """
+        voxel_features = []
+        voxel_num_points = []
+        voxel_coords = []
+
+        for i in range(len(batch)):
+            voxel_features.append(batch[i]['voxel_features'])
+            voxel_num_points.append(batch[i]['voxel_num_points'])
+            coords = batch[i]['voxel_coords']
+            voxel_coords.append(
+                np.pad(coords, ((0, 0), (1, 0)),
+                       mode='constant', constant_values=i))
+
+        voxel_num_points = torch.from_numpy(np.concatenate(voxel_num_points))
+        voxel_features = torch.from_numpy(np.concatenate(voxel_features))
+        voxel_coords = torch.from_numpy(np.concatenate(voxel_coords))
+
+        return {'voxel_features': voxel_features,
+                'voxel_coords': voxel_coords,
+                'voxel_num_points': voxel_num_points}
+
+    @staticmethod
+    def collate_batch_dict(batch: dict):
+        """
+        Collate batch if the batch is a dictionary,
+        eg: {'voxel_features': [feature1, feature2...., feature n]}
+
+        Parameters
+        ----------
+        batch : dict
+
+        Returns
+        -------
+        processed_batch : dict
+            Updated lidar batch.
+        """
+        voxel_features = \
+            torch.from_numpy(np.concatenate(batch['voxel_features']))
+        voxel_num_points = \
+            torch.from_numpy(np.concatenate(batch['voxel_num_points']))
+        coords = batch['voxel_coords']
+        voxel_coords = []
+
+        for i in range(len(coords)):
+            voxel_coords.append(
+                np.pad(coords[i], ((0, 0), (1, 0)),
+                       mode='constant', constant_values=i))
+        voxel_coords = torch.from_numpy(np.concatenate(voxel_coords))
+
+        result = {'voxel_features': voxel_features,
+                  'voxel_coords': voxel_coords,
+                  'voxel_num_points': voxel_num_points}
+
+        # Handle raw points if present (for cluster fusion)
+        if 'points' in batch:
+            # Convert points list to list of tensors with batch indices
+            points_list = []
+            for i, pts in enumerate(batch['points']):
+                points_list.append(torch.from_numpy(pts).float())
+            result['points'] = points_list
+
+        return result

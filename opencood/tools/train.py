@@ -25,8 +25,13 @@ def seed_all(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
+
+    # Fix cuDNN algorithm selection issues
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True  # Changed from False - helps with cuDNN algorithm selection
+    torch.backends.cudnn.deterministic = False  # Changed from True - allows faster algorithms
+    torch.backends.cudnn.allow_tf32 = True  # Enable TensorFloat-32 for better performance on Ampere GPUs
+    torch.backends.cuda.matmul.allow_tf32 = True
 
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
@@ -36,8 +41,6 @@ def train_parser():
                         help='Continued training path')
     parser.add_argument('--fusion_method', '-f', default="intermediate",
                         help='passed to inference.')
-    parser.add_argument("--half", action='store_true',
-                        help="whether train with half precision")
     opt = parser.parse_args()
     return opt
 
@@ -74,7 +77,7 @@ def main():
     print('Creating Model')
     model = train_utils.create_model(hypes)
 
-    print(model.get_memory_footprint())
+    #print(model.get_memory_footprint())
     # exit()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -89,10 +92,6 @@ def main():
     optimizer = train_utils.setup_optimizer(hypes, model)
     # lr scheduler setup
     
-    # half precision training
-    if opt.half:
-        print("Half precision training.")
-        scaler = torch.cuda.amp.GradScaler()
 
     # if we want to train from last checkpoint.
     if opt.model_dir:
@@ -141,35 +140,20 @@ def main():
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
             batch_data['ego']['epoch'] = epoch
+            ouput_dict = model(batch_data['ego'])
             
-            if not opt.half:
-                ouput_dict = model(batch_data['ego'])
-                final_loss = criterion(ouput_dict, batch_data['ego']['label_dict'])
-            else:
-                with torch.cuda.amp.autocast():
-                    ouput_dict = model(batch_data['ego'])
-                    final_loss = criterion(ouput_dict, batch_data['ego']['label_dict'])
-            
-            criterion.logging(epoch, i, len(train_loader), writer, pbar=pbar2)
+            final_loss = criterion(ouput_dict, batch_data['ego']['label_dict'])
+            criterion.logging(epoch, i, len(train_loader), writer)#pbar=pbar2)
             pbar2.update(1)
 
             if supervise_single_flag:
-                if not opt.half:
-                    final_loss += criterion(ouput_dict, batch_data['ego']['label_dict_single'], suffix="_single") * hypes['train_params'].get("single_weight", 1)
-                else:
-                    with torch.cuda.amp.autocast():
-                        final_loss += criterion(ouput_dict, batch_data['ego']['label_dict_single'], suffix="_single") * hypes['train_params'].get("single_weight", 1)
+                final_loss += criterion(ouput_dict, batch_data['ego']['label_dict_single'], suffix="_single") * hypes['train_params'].get("single_weight", 1)
                 criterion.logging(epoch, i, len(train_loader), writer, suffix="_single", pbar=pbar3)
                 pbar3.update(1)
 
             # back-propagation
-            if not opt.half:
-                final_loss.backward()
-                optimizer.step()
-            else:
-                scaler.scale(final_loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+            final_loss.backward()
+            optimizer.step()
 
             # torch.cuda.empty_cache()  # it will destroy memory buffer
 

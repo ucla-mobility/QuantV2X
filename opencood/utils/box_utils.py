@@ -316,12 +316,10 @@ def project_box3d(box3d, transformation_matrix):
     return projected_box3d if not is_numpy else projected_box3d.numpy()
 
 
-def project_points_by_matrix_torch(points, transformation_matrix):
+def project_points_by_matrix(points, transformation_matrix):
     """
     Project the points to another coordinate system based on the
-    transfomration matrix. 
-    
-    IT NOT USED. LATTER ONE WITH THE SAME NAME WILL BE USED.
+    transformation matrix. Supports both single and batched transformation.
 
     Parameters
     ----------
@@ -329,19 +327,27 @@ def project_points_by_matrix_torch(points, transformation_matrix):
         3D points, (N, 3)
 
     transformation_matrix : torch.Tensor
-        Transformation matrix, (4, 4)
+        Transformation matrix, (4, 4) or (N, 4, 4) for batched transform
 
     Returns
     -------
     projected_points : torch.Tensor
         The projected points, (N, 3)
     """
-    # convert to homogeneous  coordinates via padding 1 at the last dimension.
+    # convert to homogeneous coordinates via padding 1 at the last dimension.
     # (N, 4)
     points_homogeneous = F.pad(points, (0, 1), mode="constant", value=1)
-    # (N, 4)
-    projected_points = torch.einsum("ik, jk->ij", points_homogeneous,
-                                    transformation_matrix)
+
+    # Handle batched transformation matrices (N, 4, 4)
+    if transformation_matrix.dim() == 3:
+        # (N, 4) @ (N, 4, 4) -> (N, 4)
+        projected_points = torch.bmm(points_homogeneous.unsqueeze(1),
+                                     transformation_matrix.transpose(-1, -2)).squeeze(1)
+    else:
+        # Single transformation matrix (4, 4)
+        # (N, 4)
+        projected_points = torch.einsum("ik, jk->ij", points_homogeneous,
+                                        transformation_matrix)
     return projected_points[:, :3]
 
 

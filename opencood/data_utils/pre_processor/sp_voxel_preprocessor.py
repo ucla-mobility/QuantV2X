@@ -169,6 +169,16 @@ class SpVoxelPreprocessor(BasePreprocessor):
                        mode='constant', constant_values=i))
         voxel_coords = torch.from_numpy(np.concatenate(voxel_coords))
 
-        return {'voxel_features': voxel_features,
-                'voxel_coords': voxel_coords,
-                'voxel_num_points': voxel_num_points}
+        result = {'voxel_features': voxel_features,
+                  'voxel_coords': voxel_coords,
+                  'voxel_num_points': voxel_num_points}
+
+        # Handle raw points if present (for cluster fusion)
+        if 'points' in batch:
+            # Convert points list to list of tensors with batch indices
+            points_list = []
+            for i, pts in enumerate(batch['points']):
+                points_list.append(torch.from_numpy(pts).float())
+            result['points'] = points_list
+
+        return result

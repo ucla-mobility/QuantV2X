@@ -11,9 +11,29 @@ import torch
 
 from opencood.utils.common_utils import torch_tensor_to_numpy
 from opencood.utils.transformation_utils import get_relative_transformation
-from opencood.utils.box_utils import create_bbx, project_box3d, nms_rotated
+from opencood.utils.box_utils import create_bbx, project_box3d, nms_rotated, boxes_to_corners_3d
 from opencood.utils.camera_utils import indices_to_depth
 from sklearn.metrics import mean_squared_error
+
+# Try mmdet3d first, fallback to custom implementation
+try:
+    from mmdet3d.core.bbox import LiDARInstance3DBoxes
+except ImportError:
+    # Minimal bbox class for compatibility
+    class LiDARInstance3DBoxes:
+        def __init__(self, tensor, origin=(0.5, 0.5, 0.5)):
+            self.tensor = tensor
+            self.origin = origin
+        def __getitem__(self, item):
+            return LiDARInstance3DBoxes(self.tensor[item], self.origin)
+        @property
+        def shape(self):
+            return self.tensor.shape
+        def __len__(self):
+            return len(self.tensor)
+        @property
+        def device(self):
+            return self.tensor.device
 
 def inference_late_fusion(batch_data, model, dataset):
     """
@@ -216,8 +236,8 @@ def inference_intermediate_fusion(batch_data, model, dataset):
         The tensor of gt bounding box.
     """
 
-    # if hasattr(model, 'model') and hasattr(model.model, 'forward_onnx_export'):
-    #     batch_data['ego']['onnx_export'] = True
+    if hasattr(model, 'model') and hasattr(model.model, 'forward_onnx_export'):
+        batch_data['ego']['onnx_export'] = True
     
     # Call the early fusion function
     return_dict = inference_early_fusion(batch_data, model, dataset)
@@ -351,3 +371,12 @@ def get_cav_box(batch_data):
 
 
     return cav_box_np, agent_modality_list
+
+def get_center_box(box: LiDARInstance3DBoxes):
+    """
+    Get BBoxes with gravity center from mmdet3d's LiDARInstance3DBoxes
+    """
+    box_tensor = torch.zeros_like(box.tensor)
+    box_tensor[:, 3:] = box.tensor[:, 3:]
+    box_tensor[:, :3] = box.gravity_center
+    return box_tensor
