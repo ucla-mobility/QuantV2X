@@ -129,4 +129,4 @@ Other useful citations:
 ```
 
 ## Other Development Team Members
-[Aiden Wong](https://sethzhao506.github.io/](https://www.linkedin.com/in/aidwong)
+[Aiden Wong](https://www.linkedin.com/in/aidwong)
