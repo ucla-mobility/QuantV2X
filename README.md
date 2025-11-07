@@ -127,3 +127,6 @@ Other useful citations:
   year={2024}
 }
 ```
+
+## Other Development Team Members
+[Aiden Wong](https://sethzhao506.github.io/](https://www.linkedin.com/in/aidwong)
