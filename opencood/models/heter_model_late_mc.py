@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+# mc functionality added by Aiden Wong <aidenwong@ucla.edu>
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 import torch
@@ -13,9 +14,12 @@ from opencood.models.sub_modules.downsample_conv import DownsampleConv
 import importlib
 
 
-class HeterModelLate(nn.Module):
+class HeterModelLateMC(nn.Module):
     def __init__(self, args):
-        super(HeterModelLate, self).__init__()
+        super().__init__()
+        self.anchor_number = args['anchor_number']
+        self.num_class = args['num_class']
+        self.dir_bins = args['dir_args']['num_bins']
         modality_name_list = list(args.keys())
         modality_name_list = [x for x in modality_name_list if x.startswith("m") and x[1:].isdigit()] 
         self.modality_name_list = modality_name_list
@@ -62,9 +66,13 @@ class HeterModelLate(nn.Module):
 
             # setup detection head
             in_head = model_setting['head_args']['in_head']
-            setattr(self, f'cls_head_{modality_name}', nn.Conv2d(in_head, args['anchor_number'], kernel_size=1))
-            setattr(self, f'reg_head_{modality_name}', nn.Conv2d(in_head, args['anchor_number'] * 7, kernel_size=1))
-            setattr(self, f'dir_head_{modality_name}', nn.Conv2d(in_head, args['anchor_number'] *  args['dir_args']['num_bins'], kernel_size=1))
+            cls_channels = self.anchor_number * self.num_class * self.num_class
+            reg_channels = self.anchor_number * 7 * self.num_class
+            dir_channels = self.anchor_number * self.dir_bins * self.num_class
+
+            setattr(self, f'cls_head_{modality_name}', nn.Conv2d(in_head, cls_channels, kernel_size=1))
+            setattr(self, f'reg_head_{modality_name}', nn.Conv2d(in_head, reg_channels, kernel_size=1))
+            setattr(self, f'dir_head_{modality_name}', nn.Conv2d(in_head, dir_channels, kernel_size=1))
 
 
     def forward(self, data_dict):
