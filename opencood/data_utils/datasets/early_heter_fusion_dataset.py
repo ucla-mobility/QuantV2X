@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
-# Heter functionality added by Aiden Wong <aidenwong@ucla.edu>
+# heter functionality added by Aiden Wong <aidenwong@ucla.edu>
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 import torch
@@ -10,14 +10,14 @@ import math
 from collections import OrderedDict
 
 from opencood.utils import box_utils
-from opencood.utils.common_utils import merge_features_to_dict
+from opencood.utils.common_utils import merge_features_to_dict, compute_iou, convert_format
 from opencood.data_utils.post_processor import build_postprocessor
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.utils.pcd_utils import \
     mask_points_by_range, mask_ego_points, shuffle_points, \
     downsample_lidar_minimum
-from opencood.utils.transformation_utils import x1_to_x2
+from opencood.utils.transformation_utils import x1_to_x2, get_pairwise_transformation
 from opencood.utils.common_utils import read_json
 from opencood.utils.common_utils import merge_features_to_dict
 from opencood.utils.heter_utils import Adaptor
@@ -29,12 +29,13 @@ def getEarlyheterFusionDataset(cls):
         point cloud to the ego vehicle.
         """
         def __init__(self, params, visualize, train=True, calibrate=False):
-            super(EarlyFusionDataset, self).__init__(params, visualize, train)
+            super().__init__(params, visualize, train, calibrate)
             self.supervise_single = True if ('supervise_single' in params['model']['args'] and params['model']['args']['supervise_single']) \
                                         else False
             assert self.supervise_single is False
             self.proj_first = False if 'proj_first' not in params['fusion']['args']\
                                          else params['fusion']['args']['proj_first']
+
             self.anchor_box = self.post_processor.generate_anchor_box()
             self.anchor_box_torch = torch.from_numpy(self.anchor_box)
 
@@ -48,13 +49,14 @@ def getEarlyheterFusionDataset(cls):
             
             lidar_channels_dict = params['heter'].get('lidar_channels_dict', OrderedDict())
             mapping_dict = params['heter']['mapping_dict']
+            cav_preference = params['heter'].get("cav_preference", None)
 
             self.adaptor = Adaptor(self.ego_modality, 
                                    self.modality_name_list,
                                    self.modality_assignment,
                                    lidar_channels_dict,
                                    mapping_dict,
-                                   None,
+                                   cav_preference,
                                    train,
                                    calibrate)
 
@@ -63,11 +65,8 @@ def getEarlyheterFusionDataset(cls):
                 if modal_setting['sensor_type'] == 'lidar':
                     setattr(self, f"pre_processor_{modality_name}", build_preprocessor(modal_setting['preprocess'], train))
 
-                elif modal_setting['sensor_type'] == 'camera':
-                    setattr(self, f"data_aug_conf_{modality_name}", modal_setting['data_aug_conf'])
-
                 else:
-                    raise("Not support this type of sensor")
+                    raise("Don't support this type of sensor, early fusion only supports lidar")
 
             self.reinitialize()
 
@@ -80,12 +79,14 @@ def getEarlyheterFusionDataset(cls):
 
             ego_id = -1
             ego_lidar_pose = []
+            ego_cav_base = None
 
             # first find the ego vehicle's lidar pose
             for cav_id, cav_content in base_data_dict.items():
                 if cav_content['ego']:
                     ego_id = cav_id
                     ego_lidar_pose = cav_content['params']['lidar_pose']
+                    ego_cav_base = cav_content
                     break
 
             assert ego_id != -1
@@ -94,6 +95,8 @@ def getEarlyheterFusionDataset(cls):
             projected_lidar_stack = []
             object_stack = []
             object_id_stack = []
+            exclude_agent = []
+            selected_cavs = OrderedDict()
 
             # loop over all CAVs to process information
             for cav_id, selected_cav_base in base_data_dict.items():
@@ -105,17 +108,27 @@ def getEarlyheterFusionDataset(cls):
                                         'lidar_pose'][1] - ego_lidar_pose[
                                         1]) ** 2)
                 if distance > self.params['comm_range']:
+                    exclude_agent.append(cav_id)
                     continue
 
+                # if modality not match
+                if self.adaptor.unmatched_modality(selected_cav_base['modality_name']):
+                    exclude_agent.append(cav_id)
+                    continue
+                selected_cavs[cav_id] = selected_cav_base
                 selected_cav_processed = self.get_item_single_car(
                     selected_cav_base,
-                    ego_lidar_pose)
+                    ego_cav_base)
+
                 # all these lidar and object coordinates are projected to ego
                 # already.
                 projected_lidar_stack.append(
                     selected_cav_processed['projected_lidar'])
                 object_stack.append(selected_cav_processed['object_bbx_center'])
                 object_id_stack += selected_cav_processed['object_ids']
+
+            if len(selected_cavs) == 0:
+                return None
 
             # exclude all repetitive objects
             unique_indices = \
@@ -170,13 +183,26 @@ def getEarlyheterFusionDataset(cls):
                     anchors=anchor_box,
                     mask=mask)
 
+            pairwise_t_matrix = get_pairwise_transformation(selected_cavs, self.max_cav, self.proj_first)
+            lidar_agent = np.ones((len(selected_cavs),), dtype=np.float32)
+            lidar_pose = np.array([cav['params']['lidar_pose'] for cav in selected_cavs.values()])
+            lidar_pose_clean = np.array([cav['params'].get('lidar_pose_clean',
+                                                           cav['params']['lidar_pose']) for cav in selected_cavs.values()])
+            agent_modality_list = [cav['modality_name'] for cav in selected_cavs.values()]
+
             processed_data_dict['ego'].update(
                 {'object_bbx_center': object_bbx_center,
                 'object_bbx_mask': mask,
                 'object_ids': [object_id_stack[i] for i in unique_indices],
                 'anchor_box': anchor_box,
                 'processed_lidar': lidar_dict,
-                'label_dict': label_dict})
+                'label_dict': label_dict,
+                'pairwise_t_matrix': pairwise_t_matrix,
+                'lidar_agent': lidar_agent,
+                'lidar_pose': lidar_pose,
+                'lidar_pose_clean': lidar_pose_clean,
+                'agent_modality_list': agent_modality_list,
+                'cav_num': len(selected_cavs)})
 
             if self.visualize:
                 processed_data_dict['ego'].update({'origin_lidar':
@@ -184,7 +210,7 @@ def getEarlyheterFusionDataset(cls):
 
             return processed_data_dict
 
-        def get_item_single_car(self, selected_cav_base, ego_pose):
+        def get_item_single_car(self, selected_cav_base, ego_cav_base):
             """
             Project the lidar and bbx to ego space first, and then do clipping.
 
@@ -201,103 +227,49 @@ def getEarlyheterFusionDataset(cls):
                 The dictionary contains the cav's processed information.
             """
             selected_cav_processed = {}
+            ego_pose = ego_cav_base['params']['lidar_pose']
+            ego_pose_clean = ego_cav_base['params'].get('lidar_pose_clean', ego_pose)
 
             # calculate the transformation matrix
             transformation_matrix = \
                 x1_to_x2(selected_cav_base['params']['lidar_pose'],
                         ego_pose)
 
+            cav_pose_clean = selected_cav_base['params'].get('lidar_pose_clean',
+                                                             selected_cav_base['params']['lidar_pose'])
+            transformation_matrix_clean = \
+                x1_to_x2(cav_pose_clean, ego_pose_clean)
+
             # retrieve objects under ego coordinates
             object_bbx_center, object_bbx_mask, object_ids = \
                 self.generate_object_center([selected_cav_base],
                                                         ego_pose)
+            modality_name = selected_cav_base['modality_name']
+            sensor_type = self.sensor_type_dict[modality_name]
 
-            # filter lidar
-            lidar_np = selected_cav_base['lidar_np']
-            lidar_np = shuffle_points(lidar_np)
-            # remove points that hit itself
-            lidar_np = mask_ego_points(lidar_np)
-            # project the lidar to ego space
-            lidar_np[:, :3] = \
-                box_utils.project_points_by_matrix_torch(lidar_np[:, :3],
-                                                        transformation_matrix)
+            if sensor_type == "lidar" or self.visualize:
+                # filter lidar
+                lidar_np = selected_cav_base['lidar_np']
+                lidar_np = shuffle_points(lidar_np)
+                # remove points that hit itself
+                lidar_np = mask_ego_points(lidar_np)
+                # project the lidar to ego space
+                lidar_np[:, :3] = \
+                    box_utils.project_points_by_matrix_torch(lidar_np[:, :3],
+                                                            transformation_matrix)
 
             selected_cav_processed.update(
                 {'object_bbx_center': object_bbx_center[object_bbx_mask == 1],
                 'object_ids': object_ids,
-                'projected_lidar': lidar_np})
+                'projected_lidar': lidar_np,
+                'transformation_matrix': transformation_matrix,
+                'transformation_matrix_clean': transformation_matrix_clean})
 
             return selected_cav_processed
 
         def collate_batch_test(self, batch):
-            """
-            Customized collate function for pytorch dataloader during testing
-            for late fusion dataset.
-
-            Parameters
-            ----------
-            batch : dict
-
-            Returns
-            -------
-            batch : dict
-                Reformatted batch.
-            """
-            # currently, we only support batch size of 1 during testing
             assert len(batch) <= 1, "Batch size 1 is required during testing!"
-            batch = batch[0] # only ego
-
-            output_dict = {}
-
-            for cav_id, cav_content in batch.items():
-                output_dict.update({cav_id: {}})
-                # shape: (1, max_num, 7)
-                object_bbx_center = \
-                    torch.from_numpy(np.array([cav_content['object_bbx_center']]))
-                object_bbx_mask = \
-                    torch.from_numpy(np.array([cav_content['object_bbx_mask']]))
-                object_ids = cav_content['object_ids']
-
-                # the anchor box is the same for all bounding boxes usually, thus
-                # we don't need the batch dimension.
-                if cav_content['anchor_box'] is not None:
-                    output_dict[cav_id].update({'anchor_box':
-                        torch.from_numpy(np.array(
-                            cav_content[
-                                'anchor_box']))})
-                if self.visualize:
-                    origin_lidar = [cav_content['origin_lidar']]
-
-                # processed lidar dictionary
-                processed_lidar_torch_dict = \
-                    self.pre_processor.collate_batch(
-                        [cav_content['processed_lidar']])
-                # label dictionary
-                label_torch_dict = \
-                    self.post_processor.collate_batch([cav_content['label_dict']])
-
-                # save the transformation matrix (4, 4) to ego vehicle
-                transformation_matrix_torch = \
-                    torch.from_numpy(np.identity(4)).float()
-                transformation_matrix_clean_torch = \
-                    torch.from_numpy(np.identity(4)).float()
-
-                output_dict[cav_id].update({'object_bbx_center': object_bbx_center,
-                                            'object_bbx_mask': object_bbx_mask,
-                                            'processed_lidar': processed_lidar_torch_dict,
-                                            'label_dict': label_torch_dict,
-                                            'object_ids': object_ids,
-                                            'transformation_matrix': transformation_matrix_torch,
-                                            'transformation_matrix_clean': transformation_matrix_clean_torch})
-
-                if self.visualize:
-                    origin_lidar = \
-                        np.array(
-                            downsample_lidar_minimum(pcd_np_list=origin_lidar))
-                    origin_lidar = torch.from_numpy(origin_lidar)
-                    output_dict[cav_id].update({'origin_lidar': origin_lidar})
-
-            return output_dict
+            return self.collate_batch_train(batch)
         
         def collate_batch_train(self, batch):
             # Intermediate fusion is different the other two
@@ -308,15 +280,15 @@ def getEarlyheterFusionDataset(cls):
             object_ids = []
             processed_lidar_list = []
             image_inputs_list = []
-            # used to record different scenario
             label_dict_list = []
             origin_lidar = []
-            
-            # heterogeneous
             lidar_agent_list = []
-
-            # pairwise transformation matrix
             pairwise_t_matrix_list = []
+            record_len_list = []
+            agent_modality_total = []
+            lidar_pose_list = []
+            lidar_pose_clean_list = []
+            record_len_list = []
             
             ### 2022.10.10 single gt ####
             if self.supervise_single:
@@ -335,6 +307,13 @@ def getEarlyheterFusionDataset(cls):
                     image_inputs_list.append(ego_dict['image_inputs']) # different cav_num, ego_dict['image_inputs'] is dict.
                 
                 label_dict_list.append(ego_dict['label_dict'])
+                if self.heterogeneous:
+                    lidar_agent_list.append(ego_dict.get('lidar_agent', np.ones(1, dtype=np.float32)))
+                pairwise_t_matrix_list.append(ego_dict.get('pairwise_t_matrix', np.tile(np.eye(4), (self.max_cav, self.max_cav, 1, 1))))
+                record_len_list.append(ego_dict.get('cav_num', 1))
+                agent_modality_total.extend(ego_dict.get('agent_modality_list', ['m1'] * ego_dict.get('cav_num', 1)))
+                lidar_pose_list.append(ego_dict.get('lidar_pose', np.zeros((ego_dict.get('cav_num', 1), 6))))
+                lidar_pose_clean_list.append(ego_dict.get('lidar_pose_clean', np.zeros((ego_dict.get('cav_num', 1), 6))))
 
                 if self.visualize:
                     origin_lidar.append(ego_dict['origin_lidar'])
@@ -346,9 +325,6 @@ def getEarlyheterFusionDataset(cls):
                     targets_single.append(ego_dict['single_label_dict_torch']['targets'])
 
                 # heterogeneous
-                if self.heterogeneous:
-                    lidar_agent_list.append(ego_dict['lidar_agent'])
-
             # convert to numpy, (B, max_num, 7)
             object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
             object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
@@ -356,29 +332,14 @@ def getEarlyheterFusionDataset(cls):
             if self.load_lidar_file:
                 merged_feature_dict = merge_features_to_dict(processed_lidar_list)
 
-                if self.heterogeneous:
-                    lidar_agent = np.concatenate(lidar_agent_list)
-                    lidar_agent_idx = lidar_agent.nonzero()[0].tolist()
-                    for k, v in merged_feature_dict.items(): # 'voxel_features' 'voxel_num_points' 'voxel_coords'
-                        merged_feature_dict[k] = [v[index] for index in lidar_agent_idx]
-
-                if not self.heterogeneous or (self.heterogeneous and sum(lidar_agent) != 0):
-                    processed_lidar_torch_dict = \
-                        self.pre_processor.collate_batch(merged_feature_dict)
-                    output_dict['ego'].update({'processed_lidar': processed_lidar_torch_dict})
+                processed_lidar_torch_dict = \
+                    self.pre_processor.collate_batch(merged_feature_dict)
+                output_dict['ego'].update({'processed_lidar': processed_lidar_torch_dict})
 
             if self.load_camera_file:
                 merged_image_inputs_dict = merge_features_to_dict(image_inputs_list, merge='cat')
 
-                if self.heterogeneous:
-                    camera_agent = 1 - lidar_agent
-                    camera_agent_idx = camera_agent.nonzero()[0].tolist()
-                    if sum(camera_agent) != 0:
-                        for k, v in merged_image_inputs_dict.items(): # 'imgs' 'rots' 'trans' ...
-                            merged_image_inputs_dict[k] = torch.stack([v[index] for index in camera_agent_idx])
-                            
-                if not self.heterogeneous or (self.heterogeneous and sum(camera_agent) != 0):
-                    output_dict['ego'].update({'image_inputs': merged_image_inputs_dict})
+                output_dict['ego'].update({'image_inputs': merged_image_inputs_dict})
             
             label_torch_dict = \
                 self.post_processor.collate_batch(label_dict_list)
@@ -389,15 +350,36 @@ def getEarlyheterFusionDataset(cls):
 
             # (B, max_cav)
             pairwise_t_matrix = torch.from_numpy(np.array(pairwise_t_matrix_list))
+            record_len_tensor = torch.from_numpy(np.array(record_len_list, dtype=int))
+            lidar_pose_tensor = torch.from_numpy(np.concatenate(lidar_pose_list, axis=0))
+            lidar_pose_clean_tensor = torch.from_numpy(np.concatenate(lidar_pose_clean_list, axis=0))
+            label_torch_dict['pairwise_t_matrix'] = pairwise_t_matrix
+            label_torch_dict['record_len'] = record_len_tensor
 
             # add pairwise_t_matrix to label dict
 
             # object id is only used during inference, where batch size is 1.
             # so here we only get the first element.
+            if len(agent_modality_total) == 0:
+                agent_modality_total = ['m1'] * int(record_len_tensor.sum().item())
+
             output_dict['ego'].update({'object_bbx_center': object_bbx_center,
                                     'object_bbx_mask': object_bbx_mask,
                                     'label_dict': label_torch_dict,
-                                    'object_ids': object_ids[0]})
+                                    'object_ids': object_ids[0],
+                                    'pairwise_t_matrix': pairwise_t_matrix,
+                                    'record_len': record_len_tensor,
+                                    'lidar_pose': lidar_pose_tensor,
+                                    'lidar_pose_clean': lidar_pose_clean_tensor,
+                                    'agent_modality_list': agent_modality_total,
+                                    'anchor_box': self.anchor_box_torch})
+
+            transformation_matrix_torch = torch.from_numpy(np.identity(4)).float()
+            transformation_matrix_clean_torch = torch.from_numpy(np.identity(4)).float()
+            output_dict['ego'].update({
+                'transformation_matrix': transformation_matrix_torch,
+                'transformation_matrix_clean': transformation_matrix_clean_torch
+            })
 
 
             if self.visualize:

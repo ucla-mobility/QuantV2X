@@ -1,21 +1,22 @@
-name: V2XReal_lidar_late_fusion
+name: DairV2X_lidar_early_heter_fusion
 yaml_parser: "load_general_params"
 
 # --- Dataset paths (ABSOLUTE) ---
-root_dir: "/data/dataset/v2xreal/train"
-validate_dir: "/data/dataset/v2xreal/val"
-test_dir: "/data/dataset/v2xreal/test"
+data_dir: "/data3/my_dair_v2x/cooperative-vehicle-infrastructure"
+root_dir: "/data3/my_dair_v2x/cooperative-vehicle-infrastructure/train.json"
+validate_dir: "/data3/my_dair_v2x/cooperative-vehicle-infrastructure/val.json"
+test_dir: "/data3/my_dair_v2x/cooperative-vehicle-infrastructure/val.json"
 
 # --- Training ---
 train_params:
-  batch_size: &batch_size 2          # per-GPU; tune based on VRAM
+  batch_size: &batch_size 4          # per-GPU; tune based on VRAM
   epoches: 20
   eval_freq: 2
   save_freq: 2
   max_cav: 5
 
 # --- Scene / inputs ---
-comm_range: 70
+comm_range: 100
 input_source: ['lidar']
 label_type: 'lidar'
 num_class: &num_class 3
@@ -23,13 +24,11 @@ cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
 dataset_mode: 'v2v'
 
 heter:
-  assignment_path: "opencood/modality_assign/v2xreal_4modality.json"
+  assignment_path: null
   ego_modality: &ego_modality "m1"
   mapping_dict:
-    m1: none # 1 and 2 are Infrastructure
-    m2: none
-    m3: m1 # 3 and 4 are Vehicle
-    m4: m1
+    m1: m1
+    m2: m1
   modality_setting:
     m1:
       sensor_type: &sensor_type_m1 'lidar'
@@ -45,8 +44,8 @@ heter:
 
 # --- Fusion --- 
 fusion:
-  core_method: 'lateheter'
-  dataset: 'v2xreal'
+  core_method: 'earlyheter'
+  dataset: 'dairv2x'
   args:
     proj_first: false
     grid_conf: None
@@ -123,7 +122,7 @@ postprocess:
 
 # --- Model (PointPillars encoder + AttFuse) ---
 model:
-  core_method: heter_model_late
+  core_method: heter_model_early
   args:
     ego_modality: *ego_modality
     lidar_range: *cav_lidar
