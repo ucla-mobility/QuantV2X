@@ -1,8 +1,8 @@
 name: stage1_model
-data_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure"
-root_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure/train.json"
-validate_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure/val.json"
-test_dir: "dataset/my_dair_v2x/v2x_c/cooperative-vehicle-infrastructure/val.json"
+data_dir: "/data3/dataset/my_dair_v2x/v2x_c/full/cooperative-vehicle-infrastructure"
+root_dir: "/data3/dataset/my_dair_v2x/v2x_c/full/cooperative-vehicle-infrastructure/train.json"
+validate_dir: "/data3/dataset/my_dair_v2x/v2x_c/full/cooperative-vehicle-infrastructure/val.json"
+test_dir: "/data3/dataset/my_dair_v2x/v2x_c/full/cooperative-vehicle-infrastructure/val.json"
 
 yaml_parser: "load_general_params"
 train_params:
