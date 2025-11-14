@@ -193,9 +193,6 @@ class V2XREALBaseDataset(Dataset):
             if self.dataset_mode == 'vc':
                 cav_list = [idx for idx in cav_list if int(idx) >= 0] + \
                         [idx for idx in cav_list if int(idx) < 0]
-                print(cav_list)
-                cav_list.remove('-1') if '-1' in cav_list else None
-                cav_list.remove('2') if '2' in cav_list else None
             elif self.dataset_mode == 'v2v':
                 cav_list = [idx for idx in cav_list if int(idx) >= 0]
             elif self.dataset_mode == 'ic':
