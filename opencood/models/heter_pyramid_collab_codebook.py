@@ -127,8 +127,9 @@ class HeterPyramidCollabCodebook(HeterPyramidCollab):
         output_dict.update({'codebook_loss': codebook_loss})
         # ======================
 
-        if self.compress:
-            heter_feature_2d = self.compressor(heter_feature_2d)
+        # Comment: No compressor here, as the codebook already serves the compression purpose
+        # if self.compress: 
+        #     heter_feature_2d = self.compressor(heter_feature_2d)
 
         # heter_feature_2d is downsampled 2x
         # add croping information to collaboration module

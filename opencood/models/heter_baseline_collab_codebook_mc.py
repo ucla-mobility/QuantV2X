@@ -1,38 +1,44 @@
-""" Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+# -*- coding: utf-8 -*-
+# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+# License: TDG-Attribution-NonCommercial-NoDistrib
 
-HEAL: An Extensible Framework for Open Heterogeneous Collaborative Perception 
-"""
+# Baseline heterogeneous collaboration with codebook learning for multi-class detection.
+# Support multiple fusion strategies with codebook quantization.
+
 
 import torch
 import torch.nn as nn
 import numpy as np
 from icecream import ic
 from collections import OrderedDict, Counter
-from opencood.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbone 
+from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
+from opencood.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbone
 from opencood.models.sub_modules.feature_alignnet import AlignNet
+from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
 from opencood.models.sub_modules.naive_compress import NaiveCompressor
-from opencood.models.fuse_modules.pyramid_fuse_onnx import PyramidFusion
+from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, DiscoFusion, V2VNetFusion, V2XViTFusion, CoBEVT, Where2commFusion, Who2comFusion
+from opencood.models.fuse_modules.f_cooper_fuse import SpatialFusion
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 from opencood.utils.model_utils import check_trainable_module, fix_bn, unfix_bn
-from opencood.models.heter_pyramid_collab_mc import HeterPyramidCollabMC
-from opencood.models.sub_modules.codebook import UMGMQuantizer #import codebook module
-from opencood.utils.transformation_utils import normalize_pairwise_tfm
+from opencood.models.heter_model_baseline_mc import HeterModelBaselineMC
+from opencood.models.sub_modules.codebook import UMGMQuantizer  # import codebook module
 import importlib
 import torchvision
 
-class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
+
+class HeterBaselineCollabCodebookMC(HeterModelBaselineMC):
     def __init__(self, args):
-        super(HeterPyramidCollabCodebookMC, self).__init__(args)
+        super(HeterBaselineCollabCodebookMC, self).__init__(args)
         self.channel = 64
-        
+
         if 'codebook' in args:
             self.seg_num = args['codebook']['seg_num']
             self.dict_size = [args['codebook']['dict_size']] * 3
         else:
             self.seg_num = 2
             self.dict_size = [256] * 3  # default to 256 for all stages
-     
+
         self.p_rate = 0.0  # typically 0.0 - don't inject noise
 
         self.codebook = UMGMQuantizer(
@@ -63,11 +69,11 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
                 p.requires_grad_(True)
 
     def forward(self, data_dict):
-        output_dict = {'pyramid': 'collab'}
-        agent_modality_list = data_dict['agent_modality_list'] 
+        output_dict = {}
+        agent_modality_list = data_dict['agent_modality_list']
         affine_matrix = normalize_pairwise_tfm(data_dict['pairwise_t_matrix'], self.H, self.W, self.fake_voxel_size)
-        record_len = data_dict['record_len'] 
-        # print(agent_modality_list)
+        record_len = data_dict['record_len']
+
         modality_count_dict = Counter(agent_modality_list)
         modality_feature_dict = {}
 
@@ -76,7 +82,7 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
                 continue
             feature = eval(f"self.encoder_{modality_name}")(data_dict, modality_name)
             feature = eval(f"self.backbone_{modality_name}")(feature)
-            feature = eval(f"self.aligner_{modality_name}")(feature)
+            feature = eval(f"self.shrinker_{modality_name}")(feature)
             modality_feature_dict[modality_name] = feature
 
         """
@@ -114,9 +120,7 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
         N, C, H, W = heter_feature_2d.shape
         """
         N = number of agents
-
         C = channels
-
         H, W = spatial size (feature map dimensions)
         """
         flattened = heter_feature_2d.permute(0, 2, 3, 1).contiguous().view(-1, C)
@@ -126,21 +130,28 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
         heter_feature_2d = quantized
         output_dict.update({'codebook_loss': codebook_loss})
         # ======================
-        
+
         # Comment: No compressor here, as the codebook already serves the compression purpose
         # if self.compress: 
         #     heter_feature_2d = self.compressor(heter_feature_2d)
 
-        # heter_feature_2d is downsampled 2x
-        # add croping information to collaboration module
-        
-        fused_feature, occ_outputs = self.pyramid_backbone(
-                                                heter_feature_2d,
-                                                record_len, 
-                                                affine_matrix, 
-                                                agent_modality_list, 
-                                                self.cam_crop_info
-                                            )
+        """
+        Single supervision
+        """
+        if self.supervise_single:
+            cls_preds_before_fusion = self.cls_head_single(heter_feature_2d)
+            reg_preds_before_fusion = self.reg_head_single(heter_feature_2d)
+            dir_preds_before_fusion = self.dir_head_single(heter_feature_2d)
+            output_dict.update({'cls_preds_single': cls_preds_before_fusion,
+                                'reg_preds_single': reg_preds_before_fusion,
+                                'dir_preds_single': dir_preds_before_fusion})
+
+        """
+        Feature Fusion (multiscale).
+
+        we omit self.backbone's first layer.
+        """
+        fused_feature = self.fusion_net(heter_feature_2d, record_len, affine_matrix)
 
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
@@ -152,11 +163,18 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
         output_dict.update({'cls_preds': cls_preds,
                             'reg_preds': reg_preds,
                             'dir_preds': dir_preds})
-        
-        output_dict.update({'occ_single_list': 
-                            occ_outputs})
-        
-        output_dict.update({'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)}) #for calibration
+
+        output_dict.update({'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)})
 
         return output_dict
 
+    def get_memory_footprint(self):
+        """Calculate the total memory footprint of the model's parameters and buffers."""
+        total_size = 0
+        for param in self.parameters():
+            total_size += param.nelement() * param.element_size()
+        for buffer in self.buffers():
+            total_size += buffer.nelement() * buffer.element_size()
+
+        total_size_MB = total_size / (1024 ** 2)  # Convert to MB
+        return f"Model Memory Footprint: {total_size_MB:.2f} MB"
