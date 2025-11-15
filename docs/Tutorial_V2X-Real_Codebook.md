@@ -8,19 +8,19 @@ We uses yaml file to configure all the parameters for training. To train your ow
 from scratch or a continued checkpoint, run the following commonds:
 
 ```python
-python ./opencood/tools/train.py -y ./opencood/hypes_yaml/v2x_real/Codebook/stage1/lidar_pyramid_stage1.yaml
+python ./opencood/tools/train.py -y ./opencood/hypes_yaml/v2x_real/Codebook/Pyramid/lidar_pyramid_stage1.yaml
 ```
 
 ### Stage 2: Codebook-only Training
 ```python
-python ./opencood/tools/train_stage2.py --hypes_yaml ./opencood/hypes_yaml/v2x_real/Codebook/stage2/lidar_pyramid_stage2.yaml --stage1_model your_path_to_stage1_model.pth
+python ./opencood/tools/train_stage2.py --hypes_yaml ./opencood/hypes_yaml/v2x_real/Codebook/Pyramid/lidar_pyramid_stage2.yaml --stage1_model your_path_to_stage1_model.pth
 ```
 
 - `stage1_model` points to the pretrained checkpoint from **Stage 1**.
 
 ### Stage 3: Codebook Co-training
 ```python
-python ./opencood/tools/train_stage3.py --hypes_yaml ./opencood/hypes_yaml/v2x_real/Codebook/stage3/lidar_pyramid_stage3.yaml --stage2_model your_path_to_stage2_model.pth
+python ./opencood/tools/train_stage3.py --hypes_yaml ./opencood/hypes_yaml/v2x_real/Codebook/Pyramid/lidar_pyramid_stage3.yaml --stage2_model your_path_to_stage2_model.pth
 ```
 
 - `stage2_model` points to the pretrained checkpoint from **Stage 2**.
