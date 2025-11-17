@@ -30,7 +30,7 @@ import torchvision
 class HeterBaselineCollabCodebookMC(HeterModelBaselineMC):
     def __init__(self, args):
         super(HeterBaselineCollabCodebookMC, self).__init__(args)
-        self.channel = 64
+        self.channel = 256
 
         if 'codebook' in args:
             self.seg_num = args['codebook']['seg_num']

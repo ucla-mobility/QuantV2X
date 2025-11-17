@@ -1,67 +1,74 @@
-name: stage1_fcooper_model
-root_dir: "/data/dataset/v2xreal/train"
-validate_dir: "/data/dataset/v2xreal/test"
-test_dir: "/data/dataset/v2xreal/test"
-
+name: stage1_lidar_fcooper
 yaml_parser: "load_general_params"
+
+# Dataset
+root_dir: "/data/dataset/v2x-real/train"
+validate_dir: "/data/dataset/v2x-real/test"
+test_dir: "/data/dataset/v2x-real/test"
+
+# Training
 train_params:
-  batch_size: &batch_size 8
+  batch_size: &batch_size 4          # per-GPU; tune based on VRAM
   epoches: 20
-  eval_freq: 2
-  save_freq: 2
+  eval_freq: 1
+  save_freq: 1
   max_cav: 4
 
+# Scene / inputs
 comm_range: 70
 input_source: ['lidar']
 label_type: 'lidar'
-cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
 num_class: &num_class 3
+cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
 dataset_mode: 'v2v'
 
 heter:
   assignment_path: "opencood/modality_assign/v2xreal_4modality.json"
   ego_modality: &ego_modality "m1"
   mapping_dict:
-    m1: m1
-    m2: m1
+    m1: none
+    m2: none
     m3: m1
     m4: m1
   modality_setting:
     m1:
       sensor_type: &sensor_type_m1 'lidar'
       core_method: &core_method_m1 "point_pillar"
-
-      # lidar requires preprocess
       preprocess:
-        # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
         core_method: 'SpVoxelPreprocessor'
         args:
           voxel_size: &voxel_size [0.4, 0.4, 4]
           max_points_per_voxel: 32
           max_voxel_train: 32000
           max_voxel_test: 70000
-        # lidar range for each individual cav.
         cav_lidar_range: *cav_lidar
 
-
+#  Fusion 
 fusion:
   core_method: 'intermediateheter3class'
   dataset: 'v2xreal'
   args:
     proj_first: false
-    grid_conf: None # place-holder
-    data_aug_conf: None # place-holder
+    grid_conf: None
+    data_aug_conf: None
 
+# Data augmentation (applied at world level) 
+data_augment:
+  - NAME: random_world_flip
+    ALONG_AXIS_LIST: ['x']
+  - NAME: random_world_rotation
+    WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+  - NAME: random_world_scaling
+    WORLD_SCALE_RANGE: [0.95, 1.05]
 
+#  Preprocess (global defaults; per-modality overrides above) 
 preprocess:
-  # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: *voxel_size # useful
-    max_points_per_voxel: 1 # useless
-    max_voxel_train: 1 # useless
-    max_voxel_test: 1 # useless
-  # lidar range for each individual cav.
+    voxel_size: [0.4, 0.4, 4]
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
   cav_lidar_range: *cav_lidar
   num_class: *num_class
   anchor_generator_config: &anchor_generator_config
@@ -90,9 +97,8 @@ preprocess:
       'matched_threshold': 0.6
       'unmatched_threshold': 0.45
 
-# anchor box related
 postprocess:
-  core_method: 'VoxelPostprocessor3Heads' # VoxelPostprocessor, BevPostprocessor supported
+  core_method: 'VoxelPostprocessor3Heads'
   gt_range: *cav_lidar
   anchor_args:
     cav_lidar_range: *cav_lidar
@@ -107,22 +113,22 @@ postprocess:
     pos_threshold: 0.6
     neg_threshold: 0.45
     score_threshold: 0.2
-  order: 'hwl' # hwl or lwh
-  max_num: 150 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
+  order: 'hwl'
+  max_num: 150
   nms_thresh: 0.15
   dir_args: &dir_args
     dir_offset: 0.7853
     num_bins: 2
     anchor_yaw: *anchor_yaw
 
-# model related
+#  Model (PointPillars encoder + Fcooper) 
 model:
   core_method: heter_model_baseline_mc
   args:
     ego_modality: *ego_modality
     num_class: *num_class
     lidar_range: *cav_lidar
-    supervise_single: True
+    supervise_single: False
     in_head_single: 256
 
     m1:
@@ -154,12 +160,12 @@ model:
         dim: [256]
         input_dim: 384
 
-    fusion_method: fcooper
+    fusion_method: max
     in_head: 256
     anchor_number: *anchor_num
     dir_args: *dir_args
 
-
+# Loss
 loss:
   core_method: point_pillar_depth_loss_mc
   args:
@@ -182,7 +188,6 @@ loss:
     depth:
       weight: 1.0
 
-
 optimizer:
   core_method: Adam
   lr: 0.002
@@ -193,4 +198,4 @@ optimizer:
 lr_scheduler:
   core_method: multistep #step, multistep and Exponential support
   gamma: 0.1
-  step_size: [15, 25]
+  step_size: [10, 25]

@@ -1,11 +1,11 @@
 name: stage2_attfuse_model
-root_dir: "/data/dataset/v2xreal/train"
-validate_dir: "/data/dataset/v2xreal/test"
-test_dir: "/data/dataset/v2xreal/test"
+root_dir: "/data/dataset/v2x-real/train"
+validate_dir: "/data/dataset/v2x-real/test"
+test_dir: "/data/dataset/v2x-real/test"
 
 yaml_parser: "load_general_params"
 train_params:
-  batch_size: &batch_size 8
+  batch_size: &batch_size 4
   epoches: 20
   eval_freq: 1
   save_freq: 1
