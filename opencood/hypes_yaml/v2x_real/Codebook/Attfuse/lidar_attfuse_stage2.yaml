@@ -111,8 +111,8 @@ model:
   args:
     # --- Codebook settings (Stage 2: codebook-only training) ---
     codebook:
-      seg_num: 1
-      dict_size: 128
+      seg_num: 2
+      dict_size: 256
     use_codebook: true
     codebook_training: true
 

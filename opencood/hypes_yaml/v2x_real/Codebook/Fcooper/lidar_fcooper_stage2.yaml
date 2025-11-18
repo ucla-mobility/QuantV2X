@@ -1,7 +1,7 @@
 name: stage2_fcooper_model
-root_dir: "/data/dataset/v2xreal/train"
-validate_dir: "/data/dataset/v2xreal/test"
-test_dir: "/data/dataset/v2xreal/test"
+root_dir: "/data/dataset/v2x-real/train"
+validate_dir: "/data/dataset/v2x-real/test"
+test_dir: "/data/dataset/v2x-real/test"
 
 yaml_parser: "load_general_params"
 train_params:
@@ -22,8 +22,8 @@ heter:
   assignment_path: "opencood/modality_assign/v2xreal_4modality.json"
   ego_modality: &ego_modality "m1"
   mapping_dict:
-    m1: m1   # All agents use m1
-    m2: m1
+    m1: none   # All agents use m1
+    m2: none
     m3: m1
     m4: m1
   modality_setting:
@@ -111,8 +111,8 @@ model:
   args:
     # --- Codebook settings (Stage 2: codebook-only training) ---
     codebook:
-      seg_num: 1
-      dict_size: 128
+      seg_num: 2
+      dict_size: 256
     use_codebook: true
     codebook_training: true
 
@@ -148,7 +148,7 @@ model:
         dim: [256]
         input_dim: 384
 
-    fusion_method: fcooper
+    fusion_method: max
     in_head: 256
     anchor_number: *anchor_num
     dir_args: *dir_args

@@ -1,60 +1,68 @@
-name: stage3_fcooper_model
+name: stage1_lidar_pyramid
 root_dir: "/data/dataset/v2x-real/train"
 validate_dir: "/data/dataset/v2x-real/test"
-test_dir: "/data/dataset/v2xreal/test"
+test_dir: "/data/dataset/v2x-real/test"
 
 yaml_parser: "load_general_params"
 train_params:
-  batch_size: &batch_size 4
-  epoches: 10
+  batch_size: &batch_size 8
+  epoches: 20
   eval_freq: 1
   save_freq: 1
   max_cav: 4
-  stage3_codebook_weight: 0.05
 
 comm_range: 70
 input_source: ['lidar']
 label_type: 'lidar'
 cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1]
+# [-102.4, -51.2, -3, 102.4, 51.2, 1]
 num_class: &num_class 3
 dataset_mode: 'v2v'
 
 heter:
-  assignment_path: "opencood/modality_assign/v2xreal_4modality.json"
+  assignment_path: "opencood/modality_assign/v2xreal_4modality.json" 
   ego_modality: &ego_modality "m1"
   mapping_dict:
-    m1: none   # All agents use m1
+    m1: none # 1 and 2 are Infrastructure
     m2: none
-    m3: m1
+    m3: m1 # 3 and 4 are Vehicle
     m4: m1
   modality_setting:
     m1:
       sensor_type: &sensor_type_m1 'lidar'
       core_method: &core_method_m1 "point_pillar"
+
+      # lidar requires preprocess
       preprocess:
+        # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
         core_method: 'SpVoxelPreprocessor'
         args:
           voxel_size: &voxel_size [0.4, 0.4, 4]
           max_points_per_voxel: 32
           max_voxel_train: 32000
           max_voxel_test: 70000
+        # lidar range for each individual cav.
         cav_lidar_range: *cav_lidar
+
 
 fusion:
   core_method: 'intermediateheter3class'
   dataset: 'v2xreal'
-  args:
+  args: 
     proj_first: false
-    grid_conf: None
-    data_aug_conf: None
+    grid_conf: None # place-holder
+    data_aug_conf: None # place-holder
+
 
 preprocess:
+  # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: *voxel_size
-    max_points_per_voxel: 1
-    max_voxel_train: 1
-    max_voxel_test: 1
+    voxel_size: *voxel_size # useful
+    max_points_per_voxel: 1 # useless
+    max_voxel_train: 1 # useless
+    max_voxel_test: 1 # useless
+  # lidar range for each individual cav.
   cav_lidar_range: *cav_lidar
   num_class: *num_class
   anchor_generator_config: &anchor_generator_config
@@ -83,8 +91,9 @@ preprocess:
       'matched_threshold': 0.6
       'unmatched_threshold': 0.45
 
+# anchor box related
 postprocess:
-  core_method: 'VoxelPostprocessor3Heads'
+  core_method: 'VoxelPostprocessor3Heads' # VoxelPostprocessor, BevPostprocessor supported
   gt_range: *cav_lidar
   anchor_args:
     cav_lidar_range: *cav_lidar
@@ -99,33 +108,25 @@ postprocess:
     pos_threshold: 0.6
     neg_threshold: 0.45
     score_threshold: 0.2
-  order: 'hwl'
-  max_num: 150
+  order: 'hwl' # hwl or lwh
+  max_num: 150 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
   dir_args: &dir_args
     dir_offset: 0.7853
     num_bins: 2
     anchor_yaw: *anchor_yaw
 
+# model related
 model:
-  core_method: heter_baseline_collab_codebook_mc
+  core_method: heter_pyramid_collab_mc
   args:
-    # --- Codebook settings (Stage 3: co-train codebook + detector) ---
-    codebook:
-      seg_num: 1
-      dict_size: 128
-    use_codebook: true
-    codebook_training: true
-
-    ego_modality: *ego_modality
     num_class: *num_class
     lidar_range: *cav_lidar
     supervise_single: True
-    in_head_single: 256
-
     m1:
       core_method: *core_method_m1
       sensor_type: *sensor_type_m1
+
       encoder_args:
         voxel_size: *voxel_size
         lidar_range: *cav_lidar
@@ -136,26 +137,41 @@ model:
           num_filters: [64]
         point_pillar_scatter:
           num_features: 64
-      backbone_args:
-        layer_nums: [3, 5, 8]
-        layer_strides: [2, 2, 2]
-        num_filters: [64, 128, 256]
-        upsample_strides: [1, 2, 4]
-        num_upsample_filter: [128, 128, 128]
-      shrink_header:
-        kernal_size: [3]
-        stride: [1]
-        padding: [1]
-        dim: [256]
-        input_dim: 384
 
-    fusion_method: max
+      backbone_args:
+        layer_nums: [3]
+        layer_strides: [2]
+        num_filters: [64]
+  
+      aligner_args:
+        core_method: identity
+
+    fusion_backbone: 
+      resnext: true
+      stage: collab
+      layer_nums: [3, 5, 8]
+      layer_strides: [1, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+      anchor_number: *anchor_num
+
+    shrink_header: 
+      kernal_size: [ 3 ]
+      stride: [ 1 ]
+      padding: [ 1 ]
+      dim: [ 256 ]
+      input_dim: 384 # 128 * 3
+
+    fusion_method: pyramid
+    
     in_head: 256
     anchor_number: *anchor_num
     dir_args: *dir_args
 
+
 loss:
-  core_method: point_pillar_depth_loss_mc
+  core_method: point_pillar_pyramid_loss_mc
   args:
     num_class: *num_class
     pos_cls_weight: 2.0
@@ -175,15 +191,20 @@ loss:
       args: *dir_args
     depth:
       weight: 1.0
+    pyramid:
+      relative_downsample: [1, 2, 4]
+      weight: [0.4, 0.2, 0.1]
+
 
 optimizer:
   core_method: Adam
-  lr: 0.0002
+  lr: 0.002
   args:
     eps: 1e-10
     weight_decay: 1e-4
 
 lr_scheduler:
-  core_method: multistep
+  core_method: multistep #step, multistep and Exponential support
   gamma: 0.1
-  step_size: [5, 8]
+  step_size: [15, 25]
+

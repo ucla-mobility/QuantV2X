@@ -1,7 +1,7 @@
 name: stage3_attfuse_model
-root_dir: "/data/dataset/v2xreal/train"
-validate_dir: "/data/dataset/v2xreal/test"
-test_dir: "/data/dataset/v2xreal/test"
+root_dir: "/data/dataset/v2x-real/train"
+validate_dir: "/data/dataset/v2x-real/test"
+test_dir: "/data/dataset/v2x-real/test"
 
 yaml_parser: "load_general_params"
 train_params:

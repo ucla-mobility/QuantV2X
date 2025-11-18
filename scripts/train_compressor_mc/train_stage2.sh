@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python ./opencood/tools/train.py --hypes_yaml ./opencood/hypes_yaml/v2x_real/Naive_Compressor/Fcooper/lidar_fcooper_stage2.yaml --model_dir your_pretrained_model_dir
