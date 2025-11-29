@@ -25,12 +25,21 @@ python ./opencood/tools/train_stage3.py --hypes_yaml ./opencood/hypes_yaml/v2x_r
 
 - `stage2_model` points to the pretrained checkpoint from **Stage 2**.
 
-### Test the model
+### Test the model 
+
+For soft quantization, use:
 
 ```python
 python opencood/tools/inference_mc.py --model_dir ${CHECKPOINT_FOLDER} [--fusion_method intermediate]
 ```
 
+For hard quantization, use:
+
+```python
+python ./opencood/tools/inference_mc_codebook_encdec.py --model_dir ${CHECKPOINT_FOLDER} [--fusion_method intermediate] 
+```
+
+For hard quantization with emulation (cache the quantized feature into disk), please refer to `/scripts/inference_mc/inference_mc_codebook_encdec_cached.sh` as reference.
 
 ### Notes:
 - You could refer to `/scripts/train_codebook_mc` folder to for example running scripts. `mc` stands for `multi-class`, which differentiates itself from `single-class` training and inference.

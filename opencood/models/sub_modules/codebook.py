@@ -187,7 +187,7 @@ class _multiCodebookDeQuantization(nn.Module):
         super().__init__()
         self._m, self._k, self._d = codebook.shape
         self._codebook = codebook
-        # self.register_buffer("_ix", torch.arange(self._m), persistent=False)
+        self.register_buffer("_ix", torch.arange(self._m), persistent=False)
 
     def decode(self, code: torch.Tensor):
         # codes: [n, m]
@@ -197,8 +197,8 @@ class _multiCodebookDeQuantization(nn.Module):
         ix = self._ix.expand_as(code)
         # [n, m, d]
         indexed = self._codebook[ix, code]
-        # [n, c]
-        return indexed
+        # [n, c] - reshape from [n, m, d] to [n, m*d]
+        return indexed.reshape(n, -1)
 
     # NOTE: ALREADY CHECKED CONSISTENCY WITH NAIVE IMPL.
     def forward(self, sample: torch.Tensor):
