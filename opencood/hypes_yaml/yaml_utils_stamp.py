@@ -2,6 +2,10 @@
 # Author: Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
+# Modifications by Xiangbo Gao <xiangbogaobarry@gmail.com>
+# New License for modifications: MIT License
+
+
 
 import re
 import yaml
@@ -11,7 +15,26 @@ import math
 import numpy as np
 
 
-def load_yaml(file, opt=None):
+def matrix_to_pose(matrix):
+    # Ensure the matrix is a numpy array
+    matrix = np.array(matrix)
+    
+    # Extract translation
+    x = matrix[0, 3]
+    y = matrix[1, 3]
+    z = matrix[2, 3]
+    
+    # Extract rotation matrix
+    R = matrix[:3, :3]
+    
+    # Calculate Euler angles from rotation matrix
+    roll = np.arctan2(R[2, 1], R[2, 2])
+    pitch = np.arctan2(-R[2, 0], np.sqrt(R[2, 1]**2 + R[2, 2]**2))
+    yaw = np.arctan2(R[1, 0], R[0, 0])
+    
+    return np.array([x, y, z, roll, pitch, yaw])
+
+def load_yaml(file, opt=None, config=None):
     """
     Load yaml file and return a dictionary.
 
@@ -27,8 +50,11 @@ def load_yaml(file, opt=None):
     param : dict
         A dictionary that contains defined parameters.
     """
-    if opt and opt.model_dir:
-        file = os.path.join(opt.model_dir, 'config.yaml')
+    if config:
+        file = config
+    else:
+        if opt and opt.model_dir:
+            file = os.path.join(opt.model_dir, 'config.yaml')
 
     stream = open(file, 'r')
     loader = yaml.Loader
@@ -42,19 +68,82 @@ def load_yaml(file, opt=None):
         |[-+]?\\.(?:inf|Inf|INF)
         |\\.(?:nan|NaN|NAN))$''', re.X),
         list(u'-+0123456789.'))
+    
     param = yaml.load(stream, Loader=loader)
+    if 'lidar_pose' in param:
+        if param['lidar_pose'] is not None and isinstance(param['lidar_pose'], np.ndarray) and param['lidar_pose'].shape == (4, 4):
+            param['lidar_pose'] = matrix_to_pose(param['lidar_pose'])
+            
     if "yaml_parser" in param:
-        param = eval(param["yaml_parser"])(param)
-    if "heter" in param and "modality_setting" in param["heter"]:
-        for modality_name, modality_cfg in param["heter"]["modality_setting"].items():
-            postprocess = modality_cfg.get("postprocess")
-            anchor_args = postprocess.get("anchor_args") if isinstance(postprocess, dict) else None
-            if isinstance(anchor_args, dict) and "W" not in anchor_args:
-                try:
-                    param["heter"]["modality_setting"][modality_name] = load_general_params(modality_cfg)
-                except Exception:
-                    pass
+        if isinstance(param["yaml_parser"], str):
+            param = eval(param["yaml_parser"])(param)
+        else:
+            for yaml_parser in param["yaml_parser"]:
+                param = eval(yaml_parser)(param)
+    elif "yaml_parsers" in param:
+        for modality_name in param["heter"]["modality_setting"]:
+            if isinstance(param["yaml_parsers"][modality_name], str):
+                yaml_parser = param["yaml_parsers"][modality_name]
+                param["heter"]["modality_setting"][modality_name] = eval(yaml_parser)(param["heter"]["modality_setting"][modality_name])
+                if yaml_parser == 'load_bev_params':
+                    param['model']['args'][modality_name]['encoder_args']['geometry_param'] = \
+                        param["heter"]["modality_setting"][modality_name]["preprocess"]["geometry_param"]                
+            else:
+                for yaml_parser in param["yaml_parsers"][modality_name]:
+                    param["heter"]["modality_setting"][modality_name] = eval(yaml_parser)(param["heter"]["modality_setting"][modality_name])
+                    if yaml_parser == 'load_bev_params':
+                        param['model']['args'][modality_name]['encoder_args']['geometry_param'] = \
+                            param["heter"]["modality_setting"][modality_name]["preprocess"]["geometry_param"]                
 
+
+    # Ensure top-level anchor_args has W/H/D when present (STAMP stage2 uses yaml_parsers only).
+    if isinstance(param, dict) and "postprocess" in param and isinstance(param["postprocess"], dict):
+        anchor_args = param["postprocess"].get("anchor_args")
+        if isinstance(anchor_args, dict) and "W" not in anchor_args:
+            try:
+                param = load_general_params(param)
+            except Exception:
+                pass
+
+    return param
+
+def update_yaml(param, opt=None):
+    if "yaml_parser" in param:
+        if isinstance(param["yaml_parser"], str):
+            param = eval(param["yaml_parser"])(param)
+        else:
+            for yaml_parser in param["yaml_parser"]:
+                param = eval(yaml_parser)(param)
+    elif "yaml_parsers" in param:
+        for modality_name in param["heter"]["modality_setting"]:
+            if isinstance(param["yaml_parsers"][modality_name], str):
+                yaml_parser = param["yaml_parsers"][modality_name]
+                param["heter"]["modality_setting"][modality_name] = eval(yaml_parser)(param["heter"]["modality_setting"][modality_name])
+                if yaml_parser == 'load_bev_params':
+                    param['model']['args'][modality_name]['encoder_args']['geometry_param'] = \
+                        param["heter"]["modality_setting"][modality_name]["preprocess"]["geometry_param"]                
+            else:
+                for yaml_parser in param["yaml_parsers"][modality_name]:
+                    param["heter"]["modality_setting"][modality_name] = eval(yaml_parser)(param["heter"]["modality_setting"][modality_name])
+                    if yaml_parser == 'load_bev_params':
+                        param['model']['args'][modality_name]['encoder_args']['geometry_param'] = \
+                            param["heter"]["modality_setting"][modality_name]["preprocess"]["geometry_param"]                
+                
+
+    # Ensure top-level anchor_args has W/H/D when present (STAMP stage2 uses yaml_parsers only).
+    if isinstance(param, dict) and "postprocess" in param and isinstance(param["postprocess"], dict):
+        anchor_args = param["postprocess"].get("anchor_args")
+        if isinstance(anchor_args, dict) and "W" not in anchor_args:
+            try:
+                param = load_general_params(param)
+            except Exception:
+                pass
+
+    return param
+    
+
+
+def load_rgb_params(param):
     return param
 
 
@@ -211,7 +300,6 @@ def load_bev_params(param):
 
     def f(low, high, r):
         return int((high - low) / r)
-
     input_shape = (
         int((f(L1, L2, res))),
         int((f(W1, W2, res))),
@@ -236,8 +324,10 @@ def load_bev_params(param):
     }
     param["preprocess"]["geometry_param"] = geometry_param
     param["postprocess"]["geometry_param"] = geometry_param
-    param["model"]["args"]["geometry_param"] = geometry_param
+    if param.get("model", None): # For hetergenous setting, param refers to param[heter][modality_setting][modality_name], therefore model is not in param
+        param["model"]["args"]["geometry_param"] = geometry_param
     return param
+
 
 
 def save_yaml(data, save_name):
@@ -358,8 +448,19 @@ def load_general_params(param):
     param : dict
         Modified parameter dictionary with new attribute.
     """
-    cav_lidar_range = param['preprocess']['cav_lidar_range']
-    voxel_size = param['preprocess']['args']['voxel_size']
+    
+    
+    voxel_size = None
+    try:
+        # new version (July 2024)
+        voxel_size = param['postprocess']['voxel_size']
+    except:
+        # old version
+        voxel_size = param['preprocess']['args']['voxel_size']
+        
+    assert voxel_size is not None, "voxel_size is required for general_params"
+    
+    cav_lidar_range = param['postprocess']['gt_range']
     anchor_args = param['postprocess']['anchor_args']
 
     vw = voxel_size[0]
@@ -375,5 +476,50 @@ def load_general_params(param):
     anchor_args['D'] = math.ceil((cav_lidar_range[5] - cav_lidar_range[2]) / vd)
 
     param['postprocess'].update({'anchor_args': anchor_args})
+
+    return param
+
+
+def load_general_params_heter_task(param):
+    """
+    Based on the lidar range and resolution of voxel, calcuate the anchor box
+    and target resolution.
+
+    Parameters
+    ----------
+    param : dict
+        Original loaded parameter dictionary.
+
+    Returns
+    -------
+    param : dict
+        Modified parameter dictionary with new attribute.
+    """
+    postprocesser_param = param['postprocess']
+    
+    modality_names = param['postprocess'].keys()
+    for modality_name in modality_names:
+        assert modality_name[0] == 'm' and modality_name[1:].isdigit()
+    postprocesser_param = param['postprocess'].values()
+        
+    for p in postprocesser_param:
+    
+        cav_lidar_range = p['gt_range']
+        voxel_size = p['voxel_size']
+        anchor_args = p['anchor_args']
+
+        vw = voxel_size[0]
+        vh = voxel_size[1]
+        vd = voxel_size[2]
+
+        anchor_args['vw'] = vw
+        anchor_args['vh'] = vh
+        anchor_args['vd'] = vd
+
+        anchor_args['W'] = math.ceil((cav_lidar_range[3] - cav_lidar_range[0]) / vw) # W is image width, but along with x axis in lidar coordinate
+        anchor_args['H'] = math.ceil((cav_lidar_range[4] - cav_lidar_range[1]) / vh) # H is image height
+        anchor_args['D'] = math.ceil((cav_lidar_range[5] - cav_lidar_range[2]) / vd)
+
+        p.update({'anchor_args': anchor_args})
 
     return param

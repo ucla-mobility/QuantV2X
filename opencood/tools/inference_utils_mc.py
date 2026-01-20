@@ -22,7 +22,7 @@ def seed_all(seed=1029):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-def inference_late_fusion(batch_data, model, dataset):
+def inference_late_fusion(batch_data, model, dataset, return_output=False):
     """
     Model inference for late fusion.
 
@@ -48,10 +48,12 @@ def inference_late_fusion(batch_data, model, dataset):
         dataset.post_process(batch_data,
                              output_dict)
 
+    if return_output:
+        return output_dict, pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor
     return pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor
 
 
-def inference_nofusion(batch_data, model, dataset):
+def inference_nofusion(batch_data, model, dataset, return_output=False):
     """
     Model inference for late fusion.
 
@@ -78,9 +80,11 @@ def inference_nofusion(batch_data, model, dataset):
         dataset.post_process(batch_data,
                              output_dict)
 
+    if return_output:
+        return output_dict, pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor
     return pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor
 
-def inference_early_fusion(batch_data, model, dataset):
+def inference_early_fusion(batch_data, model, dataset, return_output=False):
     """
     Model inference for early fusion.
 
@@ -105,10 +109,12 @@ def inference_early_fusion(batch_data, model, dataset):
 
     pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor = dataset.post_process(batch_data, output_dict)
 
+    if return_output:
+        return output_dict, pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor
     return pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor
 
 
-def inference_intermediate_fusion(batch_data, model, dataset):
+def inference_intermediate_fusion(batch_data, model, dataset, return_output=False):
     """
     Model inference for early fusion.
 
@@ -125,7 +131,7 @@ def inference_intermediate_fusion(batch_data, model, dataset):
     gt_box_tensor : torch.Tensor
         The tensor of gt bounding box.
     """
-    return inference_early_fusion(batch_data, model, dataset)
+    return inference_early_fusion(batch_data, model, dataset, return_output=return_output)
 
 
 def save_prediction_gt(pred_tensor, gt_tensor, pcd, timestamp, save_path):

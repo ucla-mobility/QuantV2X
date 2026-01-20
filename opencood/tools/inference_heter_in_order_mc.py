@@ -22,6 +22,7 @@ import importlib
 
 import numpy as np
 import torch
+import cv2
 from torch.utils.data import DataLoader
 
 import opencood.data_utils
@@ -29,10 +30,50 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils, inference_utils_mc, inference_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.utils import eval_utils_mc
-from opencood.visualization import simple_vis
+from opencood.visualization import simple_vis, vis_bevfeat
 from opencood.utils.common_utils import update_dict
 
 torch.multiprocessing.set_sharing_strategy('file_system')
+
+
+def _safe_num_workers(requested):
+    if requested <= 0:
+        return 0
+    try:
+        import multiprocessing as mp
+        _ = mp.get_context().Lock()
+    except Exception:
+        return 0
+    return requested
+
+
+def _normalize_bev_map(bev_map):
+    denom = bev_map.max() - bev_map.min()
+    if denom <= 0:
+        return np.zeros_like(bev_map, dtype=np.float32)
+    return (bev_map - bev_map.min()) / denom
+
+
+def _bev_map_to_heatmap(bev_map):
+    bev_norm = _normalize_bev_map(bev_map)
+    bev_u8 = (bev_norm * 255).astype(np.uint8)
+    return cv2.applyColorMap(bev_u8, cv2.COLORMAP_VIRIDIS)
+
+
+def _overlay_heatmap(base_path, heatmap, out_path, alpha=0.35):
+    base = cv2.imread(base_path)
+    if base is None:
+        return False
+    heatmap_resized = cv2.resize(heatmap, (base.shape[1], base.shape[0]), interpolation=cv2.INTER_LINEAR)
+    overlay = cv2.addWeighted(base, 1.0 - alpha, heatmap_resized, alpha, 0)
+    cv2.imwrite(out_path, overlay)
+    return True
+
+
+def _unwrap_fused_output(output):
+    if isinstance(output, (list, tuple)) and output:
+        return output[0]
+    return output
 
 
 def build_arg_parser():
@@ -55,6 +96,12 @@ def build_arg_parser():
                         help="degrade lidar channels according to predefined settings")
     parser.add_argument('--note', default="", type=str,
                         help="extra note appended to the result folder name")
+    parser.add_argument('--save_bevfeat', action='store_true',
+                        help='save fused BEV feature heatmap and overlay')
+    parser.add_argument('--bevfeat_scale', type=int, default=1,
+                        help='upsample scale for fused BEV heatmap')
+    parser.add_argument('--bevfeat_dpi', type=int, default=500,
+                        help='dpi for fused BEV heatmap output')
     return parser
 
 
@@ -113,13 +160,60 @@ def main():
         model.cuda()
     model.eval()
 
+    feat_cache = None
+    feat_handle = None
+    if opt.save_bevfeat:
+        feat_cache = {"fused": None}
+        hook_target = None
+        hook_name = None
+        target_model = model.module if hasattr(model, "module") else model
+        ego_modality = (
+            hypes.get("ego_modality")
+            or hypes.get("model", {}).get("args", {}).get("ego_modality")
+            or getattr(target_model, "ego_modality", None)
+        )
+        if hasattr(target_model, "shrink_flag") and target_model.shrink_flag and hasattr(target_model, "shrink_conv"):
+            hook_target = target_model.shrink_conv
+            hook_name = "shrink_conv"
+        elif hasattr(target_model, "fusion_net"):
+            hook_target = target_model.fusion_net
+            hook_name = "fusion_net"
+        elif ego_modality and hasattr(target_model, f"fusion_net_{ego_modality}"):
+            hook_target = getattr(target_model, f"fusion_net_{ego_modality}")
+            hook_name = f"fusion_net_{ego_modality}"
+        else:
+            fusion_candidates = sorted(
+                name for name in dir(target_model) if name.startswith("fusion_net_")
+            )
+            if fusion_candidates:
+                if ego_modality:
+                    for name in fusion_candidates:
+                        if name == f"fusion_net_{ego_modality}":
+                            hook_target = getattr(target_model, name)
+                            hook_name = name
+                            break
+                if hook_target is None:
+                    hook_name = fusion_candidates[0]
+                    hook_target = getattr(target_model, hook_name)
+        if hook_target is None:
+            print("save_bevfeat disabled: fusion module not found on model.")
+            opt.save_bevfeat = False
+        if opt.save_bevfeat and hook_target is not None:
+            def _fused_hook(_module, _input, output):
+                feat_cache["fused"] = _unwrap_fused_output(output)
+            feat_handle = hook_target.register_forward_hook(_fused_hook)
+            print(f"Saving fused BEV features from {hook_name}.")
+
     np.random.seed(303)
 
     if opt.fusion_method == 'intermediate':
-        hypes['fusion']['core_method'] += 'infer'
+        fusion_core = hypes['fusion']['core_method']
+        if fusion_core in ['intermediate', 'intermediateheter', 'intermediateheter3class']:
+            hypes['fusion']['core_method'] = f"{fusion_core}infer"
     hypes['comm_range'] = 180
     hypes['heter']['assignment_path'] = hypes['heter']['assignment_path'].replace(".json", "_in_order.json")
     hypes = update_dict(hypes, {"ego_modality": 'm1'})
+    gt_range = hypes['postprocess']['gt_range']
 
     if opt.lidar_degrade:
         lidar_dict1 = {"m1": 32, "m3": 16}
@@ -142,7 +236,7 @@ def main():
         opencood_dataset = build_dataset(hypes, visualize=True, train=False)
         data_loader = DataLoader(opencood_dataset,
                                  batch_size=1,
-                                 num_workers=4,
+                                 num_workers=_safe_num_workers(4),
                                  collate_fn=opencood_dataset.collate_batch_test,
                                  shuffle=False,
                                  pin_memory=False,
@@ -165,6 +259,8 @@ def main():
                 continue
             with torch.no_grad():
                 batch_data = train_utils.to_device(batch_data, device)
+                if opt.save_bevfeat and feat_cache is not None:
+                    feat_cache["fused"] = None
 
                 if opt.fusion_method == 'late':
                     pred_box_tensor, pred_score, gt_box_tensor, gt_label_tensor = \
@@ -247,10 +343,33 @@ def main():
                                              vis_path,
                                              method='bev',
                                              left_hand=left_hand)
+                        if opt.save_bevfeat and feat_cache is not None:
+                            fused_feature = feat_cache.get("fused")
+                            if fused_feature is not None:
+                                bev_map = vis_bevfeat.bev_feature_to_map(fused_feature, normalize=True)
+                                scale = max(1, int(opt.bevfeat_scale))
+                                target_shape = (
+                                    int(round((gt_range[4] - gt_range[1]) * 10 * scale)),
+                                    int(round((gt_range[3] - gt_range[0]) * 10 * scale)),
+                                )
+                                bevfeat_path = os.path.join(vis_root, "bevfeat_%05d.png" % i)
+                                vis_bevfeat.vis_bev(
+                                    bev_map,
+                                    type=f"fused_{i}",
+                                    normalize=False,
+                                    save_path=bevfeat_path,
+                                    target_shape=target_shape,
+                                    dpi=max(1, int(opt.bevfeat_dpi)),
+                                )
+                                heatmap = _bev_map_to_heatmap(bev_map)
+                                overlay_path = os.path.join(vis_root, "bevfeat_overlay_%05d.png" % i)
+                                _overlay_heatmap(vis_path, heatmap, overlay_path)
 
         save_dir = os.path.join(opt.model_dir, f'eval_mc_{infer_info}')
         os.makedirs(save_dir, exist_ok=True)
         eval_utils_mc.eval_final_results(result_stat, save_dir)
+    if feat_handle is not None:
+        feat_handle.remove()
 
 
 if __name__ == "__main__":

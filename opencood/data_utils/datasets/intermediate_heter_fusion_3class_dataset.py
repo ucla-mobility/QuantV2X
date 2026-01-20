@@ -321,6 +321,7 @@ def getIntermediateheter3classFusionDataset(cls):
             assert len(ego_lidar_pose) > 0
 
             
+            input_list_m0 = [] # 2026.1.13 For STAMP collaboration base
             input_list_m1 = [] # can contain lidar or camera
             input_list_m2 = []
             input_list_m3 = []
@@ -340,6 +341,7 @@ def getIntermediateheter3classFusionDataset(cls):
 
             if self.visualize or self.kd_flag:
                 projected_lidar_stack = []
+                input_list_m0_proj = [] # 2026.1.13 For STAMP collaboration base
                 input_list_m1_proj = [] # 2023.8.31 to correct discretization errors with kd flag
                 input_list_m2_proj = []
                 input_list_m3_proj = []
@@ -361,9 +363,9 @@ def getIntermediateheter3classFusionDataset(cls):
                     continue
                 
                 # if modality not match
-                # if self.adaptor.unmatched_modality(selected_cav_base['modality_name']):
-                #     exclude_agent.append(cav_id)
-                #     continue
+                if self.adaptor.unmatched_modality(selected_cav_base['modality_name']):
+                    exclude_agent.append(cav_id)
+                    continue
 
                 lidar_pose_clean_list.append(selected_cav_base['params']['lidar_pose_clean'])
                 lidar_pose_list.append(selected_cav_base['params']['lidar_pose']) # 6dof pose
@@ -587,11 +589,13 @@ def getIntermediateheter3classFusionDataset(cls):
             object_bbx_center = []
             object_bbx_mask = []
             object_ids = []
+            inputs_list_m0 = []
             inputs_list_m1 = [] 
             inputs_list_m2 = []
             inputs_list_m3 = []
             inputs_list_m4 = []
 
+            inputs_list_m0_proj = []
             inputs_list_m1_proj = [] 
             inputs_list_m2_proj = []
             inputs_list_m3_proj = []
@@ -809,5 +813,4 @@ def getIntermediateheter3classFusionDataset(cls):
 
 
     return Intermediateheter3ClassFusionDataset
-
 

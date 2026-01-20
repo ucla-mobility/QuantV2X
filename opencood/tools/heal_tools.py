@@ -35,6 +35,35 @@ def get_model_path_from_dir(model_dir):
     
     return model_path
 
+def add_suffix_to_keys(model_dict, suffix):
+    """
+    Add suffix to keys in model_dict.
+    """
+    for key in model_dict.keys():
+        if key.startswith('message_extractor.'):
+            new_key = key.replace('message_extractor.', f'message_extractor_{suffix}.')
+            model_dict[new_key] = model_dict[key]
+    return model_dict
+
+def add_suffix_to_keys_save(log_path, suffix, save_path):
+    """
+    Add suffix to keys in model_dict.
+    """
+    model_path = get_model_path_from_dir(log_path)
+
+    model_dict = torch.load(model_path, map_location='cpu')
+    for key in list(model_dict.keys()):
+        if key.startswith('reg_head.'):
+            new_key = key.replace('reg_head.', f'reg_head_{suffix}.')
+            model_dict[new_key] = model_dict.pop(key)
+        if key.startswith('cls_head.'):
+            new_key = key.replace('cls_head.', f'cls_head_{suffix}.')
+            model_dict[new_key] = model_dict.pop(key)
+        if key.startswith('dir_head.'):
+            new_key = key.replace('dir_head.', f'dir_head_{suffix}.')
+            model_dict[new_key] = model_dict.pop(key)
+    torch.save(model_dict, os.path.join(save_path,'net_epoch1.pth'))
+
 
 def rename_to_new_version(checkpoint_path):
     # stage1 model to new vesrion
@@ -145,5 +174,10 @@ if __name__ == "__main__":
         merge_and_save(single_model_dir, stage1_model_dir, output_model_dir)
     elif func == 'merge_final': 
         merge_and_save_final(sys.argv[2:-1], sys.argv[-1])
+    elif func == 'add_suffix_to_keys_save':
+        log_path = sys.argv[2]
+        suffix = sys.argv[3]
+        save_path = sys.argv[4]
+        add_suffix_to_keys_save(log_path, suffix, save_path)
     else:
         raise "This function not implemented"
