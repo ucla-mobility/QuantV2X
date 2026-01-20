@@ -12,6 +12,123 @@ import shutil
 import torch
 import torch.optim as optim
 
+
+###added loss&load are used for stamp
+
+
+def load_original_model(saved_path, model, protocol=True):
+    """
+    Load protocol and ego model
+
+    Parameters
+    __________
+    saved_path : str
+       model saved path
+    model : opencood object
+        The model instance.
+
+    Returns
+    -------
+    model : opencood object
+        The model instance loaded pretrained params.
+    """
+
+
+    assert os.path.exists(saved_path), '{} not found'.format(saved_path)
+    ego_path = os.path.join(saved_path, 'ego.pth')
+
+    if protocol:
+        protocol_path = os.path.join(saved_path, 'protocol.pth')
+        assert os.path.exists(protocol_path), '{} not found'.format(protocol_path)
+        print("load protocal checkpoint from %s" % protocol_path)
+        loaded_protocol_state_dict = torch.load(protocol_path, map_location='cpu')
+        check_missing_key(model.state_dict(), loaded_protocol_state_dict)
+        model.load_state_dict(loaded_protocol_state_dict, strict=False)
+        print()
+
+    assert os.path.exists(ego_path), '{} not found'.format(ego_path)
+    print("load ego checkpoint from %s" % ego_path)
+    loaded_ego_state_dict = torch.load(ego_path, map_location='cpu')
+    check_missing_key(model.state_dict(), loaded_ego_state_dict)
+    model.load_state_dict(loaded_ego_state_dict, strict=False)
+
+    return model
+
+
+def create_losses_heter(hypes):
+    """
+    Create the loss function based on the given loss name.
+
+    Parameters
+    ----------
+    hypes : dict
+        Configuration params for training.
+    Returns
+    -------
+    criterion : opencood.object
+        The loss function.
+    """
+    criterion_dict = dict()
+    for modality_name in hypes['loss'].keys():
+
+        loss_func_name = hypes['loss'][modality_name]['core_method']
+        loss_func_config = hypes['loss'][modality_name]['args']
+
+        loss_filename = "opencood.loss." + loss_func_name
+        loss_lib = importlib.import_module(loss_filename)
+        loss_func = None
+        target_loss_name = loss_func_name.replace('_', '')
+
+        for name, lfunc in loss_lib.__dict__.items():
+            if name.lower() == target_loss_name.lower():
+                loss_func = lfunc
+
+        if loss_func is None:
+            print('loss function not found in loss folder. Please make sure you '
+                'have a python file named %s and has a class '
+                'called %s ignoring upper/lower case' % (loss_filename,
+                                                        target_loss_name))
+            exit(0)
+
+        criterion_dict[modality_name] = loss_func(loss_func_config)
+    return criterion_dict
+
+
+def create_adapter_loss(hypes):
+    """
+    Create the loss function based on the given loss name.
+
+    Parameters
+    ----------
+    hypes : dict
+        Configuration params for training.
+    Returns
+    -------
+    criterion : opencood.object
+        The loss function.
+    """
+    loss_func_name = hypes['loss_adapter']['core_method']
+    loss_func_config = hypes['loss_adapter']['args']
+
+    loss_filename = "opencood.loss." + loss_func_name
+    loss_lib = importlib.import_module(loss_filename)
+    loss_func = None
+    target_loss_name = loss_func_name.replace('_', '')
+
+    for name, lfunc in loss_lib.__dict__.items():
+        if name.lower() == target_loss_name.lower():
+            loss_func = lfunc
+
+    if loss_func is None:
+        print('loss function not found in loss folder. Please make sure you '
+              'have a python file named %s and has a class '
+              'called %s ignoring upper/lower case' % (loss_filename,
+                                                       target_loss_name))
+        exit(0)
+
+    criterion = loss_func(loss_func_config)
+    return criterion
+
 def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "loss"]):
     target_folder = os.path.join(full_path, 'scripts')
     if not os.path.exists(target_folder):

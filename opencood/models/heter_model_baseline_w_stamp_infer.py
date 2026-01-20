@@ -19,21 +19,23 @@ from opencood.models.sub_modules.downsample_conv import DownsampleConv
 from opencood.models.sub_modules.naive_compress import NaiveCompressor
 from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, DiscoFusion, V2VNetFusion, V2XViTFusion, CoBEVT, Where2commFusion, Who2comFusion
 from opencood.models.fuse_modules.pyramid_fuse import PyramidFusion
-from opencood.models.fuse_modules.f_cooper_fuse import SpatialFusion
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 from opencood.utils.model_utils import check_trainable_module, fix_bn, unfix_bn
+from opencood.models.stamp_modules.adapter import Adapter, Reverter
 import importlib
 import torchvision
 
-class HeterModelBaselineMC(nn.Module):
+class HeterModelBaselineWStampInfer(nn.Module):
     def __init__(self, args):
-        super(HeterModelBaselineMC, self).__init__()
+        super(HeterModelBaselineWStampInfer, self).__init__()
         self.args = args
+        self.missing_message = args.get('missing_message', False)
         self.fusion_method = args['fusion_method']
+        self.fix_modules = []
         modality_name_list = list(args.keys())
         modality_name_list = [x for x in modality_name_list if x.startswith("m") and x[1:].isdigit()] 
         self.modality_name_list = modality_name_list
-
+        self.num_class = args['num_class'] if "num_class" in args else 1
         self.ego_modality = args['ego_modality']
 
         self.cav_range = args['lidar_range']
@@ -68,14 +70,28 @@ class HeterModelBaselineMC(nn.Module):
             """
             Backbone building 
             """
-            setattr(self, f"backbone_{modality_name}", BaseBEVBackbone(model_setting['backbone_args'], 
+            setattr(self, f"backbone_{modality_name}", nn.Identity() if model_setting['backbone_args'] == 'identity' else 
+                    BaseBEVBackbone(model_setting['backbone_args'], 
                                                                        model_setting['backbone_args'].get('inplanes',64)))
 
             """
             shrink conv building
             """
             setattr(self, f"shrinker_{modality_name}", DownsampleConv(model_setting['shrink_header']))
-
+            
+            """
+            Adapter Reverter building
+            """
+            setattr(self, f"adapter_{modality_name}", Adapter(model_setting["adapter"]))
+            setattr(self, f"reverter_{modality_name}", Reverter(model_setting["reverter"]))
+            
+            self.fix_modules.append(f"encoder_{modality_name}")
+            self.fix_modules.append(f"backbone_{modality_name}")
+            self.fix_modules.append(f"shrinker_{modality_name}")
+            if modality_name != self.ego_modality:
+                self.fix_modules.append(f"adapter_{modality_name}")
+                self.fix_modules.append(f"reverter_{modality_name}")
+            
             if sensor_name == "camera":
                 camera_mask_args = model_setting['camera_mask_args']
                 setattr(self, f"crop_ratio_W_{modality_name}", (self.cav_range[3]) / (camera_mask_args['grid_conf']['xbound'][1]))
@@ -103,8 +119,6 @@ class HeterModelBaselineMC(nn.Module):
 
         if args['fusion_method'] == "max":
             self.fusion_net = MaxFusion()
-        if args['fusion_method'] == "fcooper":
-            self.fusion_net = SpatialFusion()
         if args['fusion_method'] == "att":
             self.fusion_net = AttFusion(args['att']['feat_dim'])
         if args['fusion_method'] == "disconet":
@@ -134,12 +148,23 @@ class HeterModelBaselineMC(nn.Module):
         """
         Shared Heads
         """
-        self.cls_head = nn.Conv2d(args['in_head'], args['anchor_number'] * args['num_class'] * args['num_class'],
-                                  kernel_size=1)
-        self.reg_head = nn.Conv2d(args['in_head'], 7 * args['anchor_number'] * args['num_class'],
-                                  kernel_size=1)
-        self.dir_head = nn.Conv2d(args['in_head'], args['dir_args']['num_bins'] * args['anchor_number'] * args['num_class'],
-                                  kernel_size=1) # BIN_NUM = 2
+        setattr(self, f"cls_head_{self.ego_modality}", nn.Conv2d(args['in_head'], args['anchor_number'] * self.num_class * self.num_class,
+                                  kernel_size=1))
+        setattr(self, f"reg_head_{self.ego_modality}", nn.Conv2d(args['in_head'], 7 * args['anchor_number'] * self.num_class,
+                                  kernel_size=1))
+        setattr(self, f"dir_head_{self.ego_modality}", nn.Conv2d(args['in_head'], args['dir_args']['num_bins'] * args['anchor_number'],
+                                  kernel_size=1)) # BIN_NUM = 2
+        
+        self.fix_modules.append(f"cls_head_{self.ego_modality}")
+        self.fix_modules.append(f"reg_head_{self.ego_modality}")
+        self.fix_modules.append(f"dir_head_{self.ego_modality}")
+        
+        # self.cls_head = nn.Conv2d(args['in_head'], args['anchor_number'],
+        #                           kernel_size=1)
+        # self.reg_head = nn.Conv2d(args['in_head'], 7 * args['anchor_number'],
+        #                           kernel_size=1)
+        # self.dir_head = nn.Conv2d(args['in_head'], args['dir_args']['num_bins'] * args['anchor_number'],
+        #                           kernel_size=1) # BIN_NUM = 2
         
         # compressor will be only trainable
         self.compress = False
@@ -151,6 +176,7 @@ class HeterModelBaselineMC(nn.Module):
 
 
         # check again which module is not fixed.
+        # self.model_train_init_stamp()
         check_trainable_module(self)
 
     def model_train_init(self):
@@ -163,6 +189,13 @@ class HeterModelBaselineMC(nn.Module):
             self.compressor.train()
             for p in self.compressor.parameters():
                 p.requires_grad_(True)
+    
+    def model_train_init_stamp(self):
+        for module in self.fix_modules:
+            for p in eval(f"self.{module}").parameters():
+                p.requires_grad_(False)
+            eval(f"self.{module}").apply(fix_bn)
+        
 
     def forward(self, data_dict):
         output_dict = {}
@@ -178,8 +211,14 @@ class HeterModelBaselineMC(nn.Module):
             if modality_name not in modality_count_dict:
                 continue
             feature = eval(f"self.encoder_{modality_name}")(data_dict, modality_name)
-            feature = eval(f"self.backbone_{modality_name}")(feature)
+            if not isinstance(eval(f"self.backbone_{modality_name}"), nn.Identity):
+                feature = eval(f"self.backbone_{modality_name}")({"spatial_features": feature})['spatial_features_2d']
             feature = eval(f"self.shrinker_{modality_name}")(feature)
+            if modality_name != self.ego_modality: #ego modality need not to be transformed
+                feature = eval(f"self.adapter_{modality_name}")(feature)   # cav -> protocol
+                feature = eval(f"self.reverter_{self.ego_modality}")(feature) # protocol -> egos
+            # feature = eval(f"self.adapter_{modality_name}")(feature)   # cav -> protocol
+            # feature = eval(f"self.reverter_{self.ego_modality}")(feature) # protocol -> egos
             modality_feature_dict[modality_name] = feature
 
         """
@@ -232,6 +271,14 @@ class HeterModelBaselineMC(nn.Module):
 
         we omit self.backbone's first layer.
         """
+
+        if not self.training and self.missing_message:
+            # 对heter_message应用mask，保持ego不变，其余40%置0
+            for i in range(1, heter_feature_2d.shape[0]):
+                mask = torch.rand(heter_feature_2d.shape[1], heter_feature_2d.shape[2], heter_feature_2d.shape[3], device=heter_feature_2d.device) > 0.2
+                heter_feature_2d[i] = heter_feature_2d[i] * mask
+
+
         occ_outputs = None
         if self.fusion_method == "pyramid":
             fused_out = self.fusion_net(
@@ -247,32 +294,18 @@ class HeterModelBaselineMC(nn.Module):
                 fused_feature = fused_out
         else:
             fused_feature = self.fusion_net(heter_feature_2d, record_len, affine_matrix)
-        # fused_feature = self.fusion_net(heter_feature_2d, record_len)
 
         if self.shrink_flag:
             fused_feature = self.shrink_conv(fused_feature)
 
-        cls_preds = self.cls_head(fused_feature)
-        reg_preds = self.reg_head(fused_feature)
-        dir_preds = self.dir_head(fused_feature)
+        cls_preds = eval(f"self.cls_head_{self.ego_modality}")(fused_feature)
+        reg_preds = eval(f"self.reg_head_{self.ego_modality}")(fused_feature)
+        dir_preds = eval(f"self.dir_head_{self.ego_modality}")(fused_feature)
 
         output_dict.update({'cls_preds': cls_preds,
                             'reg_preds': reg_preds,
                             'dir_preds': dir_preds})
         if occ_outputs is not None:
             output_dict.update({'occ_single_list': occ_outputs})
-        
-        output_dict.update({'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)})
 
         return output_dict
-
-    def get_memory_footprint(self):
-            """Calculate the total memory footprint of the model's parameters and buffers."""
-            total_size = 0
-            for param in self.parameters():
-                total_size += param.nelement() * param.element_size()
-            for buffer in self.buffers():
-                total_size += buffer.nelement() * buffer.element_size()
-
-            total_size_MB = total_size / (1024 ** 2)  # Convert to MB
-            return f"Model Memory Footprint: {total_size_MB:.2f} MB"
