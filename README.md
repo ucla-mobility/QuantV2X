@@ -74,6 +74,9 @@ Install bbx nms calculation cuda version
 python opencood/utils/setup.py build_ext --inplace
 ```
 
+### Support for newer GPU Architecture (sm_100+)
+Please refer to [this issue](https://github.com/ucla-mobility/QuantV2X/issues/15#issue-3926686565) regarding the support for GPU Architecture (sm_100+). We thank [erikleohasstum](https://github.com/erikleohasstum) for this contribution.
+
 ## Tutorials
 - [Tutorial of Baseline Training and Inference on V2X-Real dataset](docs/Tutorial_V2X-Real_Baseline.md)
 - [Tutorial of Codebook Learning on V2X-Real dataset](docs/Tutorial_V2X-Real_Codebook.md)
