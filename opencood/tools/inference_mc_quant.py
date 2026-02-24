@@ -245,31 +245,73 @@ if __name__ == '__main__':
         for (name, module), (_, fp_module) in zip(qt.named_children(), fp.named_children()):
             if isinstance(module, QuantModule):
                 print('Reconstruction for layer {}'.format(name))
-                layer_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    layer_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip layer {name}: {exc}")
+                    else:
+                        raise
 
             elif isinstance(module, QuantPyramidFusion): # since QuantPyramidFusion inherits from QuantResNetBEVBackbone, put it first here.
                 print('Reconstruction for pyramid fusion block {}'.format(name))
-                pyramid_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    pyramid_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip pyramid block {name}: {exc}")
+                    else:
+                        raise
 
             elif isinstance(module, (QuantResNetBEVBackbone, QuantDownsampleConv, QuantBaseBEVBackbone, QuantNaiveCompressor)):
                 print('Reconstruction for block {}'.format(name))
-                block_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    block_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip block {name}: {exc}")
+                    else:
+                        raise
 
             elif isinstance(module, QuantPFNLayer):
                 print('Reconstruction for PointPillar PFN {}'.format(name))
-                encoder_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    encoder_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip PFN {name}: {exc}")
+                    else:
+                        raise
 
             elif isinstance(module, QuantCamEncode_Resnet101):
                 print('Reconstruction for LSS ResNet {}'.format(name))
-                lss_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    lss_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip LSS ResNet {name}: {exc}")
+                    else:
+                        raise
 
             elif isinstance(module, QuantVoxelBackBone8x):
                 print('Reconstruction for SECOND {}'.format(name))
-                second_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    second_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip SECOND {name}: {exc}")
+                    else:
+                        raise
 
             elif isinstance(module, QuantV2XViTFusion):
                 print('Reconstruction for V2X-ViT {}'.format(name))
-                v2xvit_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                try:
+                    v2xvit_reconstruction(qt_model, fp_model, module, fp_module, **kwargs)
+                except RuntimeError as exc:
+                    if "No valid calibration" in str(exc):
+                        print(f"Skip V2X-ViT {name}: {exc}")
+                    else:
+                        raise
             
             else:
                 recon_model(module, fp_module)

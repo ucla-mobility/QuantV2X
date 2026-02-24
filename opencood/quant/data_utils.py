@@ -66,7 +66,10 @@ def save_inp_oup_data(model: QuantModel, block: Union[QuantModule, BaseQuantBloc
 
     for i in range(len(cali_data)):
         cur_inp = get_inp_out(cali_data[i])
-        assert type(cur_inp) in [torch.Tensor, dict] # dict for basebevbackbone, tensor for other parts
+        if cur_inp is None:
+            continue
+        if type(cur_inp) not in [torch.Tensor, dict]:
+            continue
         if isinstance(cur_inp, dict):
             cached_batches.append(cur_inp)
             is_dict = True
@@ -74,6 +77,8 @@ def save_inp_oup_data(model: QuantModel, block: Union[QuantModule, BaseQuantBloc
             channel_sizes.append(cur_inp.size(0)) # C in [C, H, W]
             cur_inp = cur_inp.unsqueeze(0) # [1, C, H, W] where 1 is the batch size
             cached_batches.append(cur_inp.cpu())
+    if len(cached_batches) == 0:
+        raise RuntimeError("No valid calibration inputs for this layer; check calibration data.")
     if is_dict or len(set(channel_sizes)) != 1:
         torch.cuda.empty_cache()
         return cached_batches # list of dict or list of tensor
@@ -149,6 +154,10 @@ class GetLayerInpOut:
                 pass
 
         handle.remove()
+        if self.data_saver.input_store is None:
+            return None
+        if len(self.data_saver.input_store) == 0:
+            return None
         if type(self.data_saver.input_store[0]) == dict:
             return self.data_saver.input_store[0] # dict 
         return self.data_saver.input_store[0].detach() # tensor
@@ -198,6 +207,12 @@ class GetDcFpLayerInpOut:
                 output_fp = output_fp['reg_preds']
             except StopForwardException:
                 pass
+            if self.data_saver.input_store is None:
+                handle.remove()
+                return None
+            if len(self.data_saver.input_store) == 0:
+                handle.remove()
+                return None
             if self.input_prob:
                 if(isinstance(self.data_saver.input_store[0], dict)):
                     input_sym = self.data_saver.input_store[0]
