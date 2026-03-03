@@ -584,6 +584,9 @@ def getIntermediateheter3classFusionDataset(cls):
 
         def collate_batch_train(self, batch):
             # Intermediate fusion is different the other two
+            batch = [sample for sample in batch if sample is not None]
+            if len(batch) == 0:
+                return None
             output_dict = {'ego': {}}
 
             object_bbx_center = []
@@ -813,4 +816,3 @@ def getIntermediateheter3classFusionDataset(cls):
 
 
     return Intermediateheter3ClassFusionDataset
-
