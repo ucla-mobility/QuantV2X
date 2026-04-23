@@ -187,6 +187,7 @@ class V2XREALBaseDataset(Dataset):
         # loop over all scenarios
         for (i, scenario_folder) in enumerate(self.scenario_folders):
             self.scenario_database.update({i: OrderedDict()})
+            scenario_name = scenario_folder.split("/")[-1]
             cav_list = sorted([x for x in os.listdir(scenario_folder)
                                if os.path.isdir(
                     os.path.join(scenario_folder, x))])
@@ -202,8 +203,10 @@ class V2XREALBaseDataset(Dataset):
                 cav_list = [idx for idx in cav_list if int(idx) < 0]
             else:
                 raise ValueError(f"{self.dataset_mode} must be either 'vc', 'v2v', or 'vc'")
-            
-            if self.train:
+
+            if getattr(self, "heterogeneous", False) and hasattr(self, "adaptor") and self.modality_assignment is not None:
+                cav_list = self.adaptor.reorder_cav_list(cav_list, scenario_name)
+            elif self.train:
                 random.shuffle(cav_list)
 
             if len(cav_list) == 0:
@@ -246,8 +249,6 @@ class V2XREALBaseDataset(Dataset):
                         camera_files
                     
                     if getattr(self, "heterogeneous", False):
-                        scenario_name = scenario_folder.split("/")[-1]
-
                         cav_modality = self.adaptor.reassign_cav_modality(self.modality_assignment[scenario_name][cav_id] , j)
 
                         self.scenario_database[i][cav_id][timestamp]['modality_name'] = cav_modality

@@ -18,7 +18,9 @@ class Adaptor:
                 mapping_dict,
                 cav_preference,
                 train,
-                calibrate):
+                calibrate,
+                use_mapping_in_train=False,
+                force_ego_first=False):
         self.ego_modality = ego_modality
         self.model_modality_list = model_modality_list
         self.modality_assignment = modality_assignment
@@ -29,6 +31,8 @@ class Adaptor:
         self.cav_preferece = cav_preference # training, probability for setting non-ego cav modality
         self.train = train
         self.calibrate = calibrate
+        self.use_mapping_in_train = use_mapping_in_train
+        self.force_ego_first = force_ego_first
 
 
     def reorder_cav_list(self, cav_list, scenario_name):
@@ -39,6 +43,21 @@ class Adaptor:
 
         work in basedataset -> reinitialize
         """
+        if self.force_ego_first and self.modality_assignment is not None:
+            assignment = self.modality_assignment[scenario_name]
+            ego_modalities = set(self.ego_modality.split("&"))
+            ego_cav = None
+            for cav_id in cav_list:
+                if self.mapping_dict[assignment[cav_id]] in ego_modalities:
+                    ego_cav = cav_id
+                    break
+
+            if ego_cav is not None:
+                other_cav = [cav_id for cav_id in cav_list if cav_id != ego_cav]
+                if self.train:
+                    random.shuffle(other_cav)
+                return [ego_cav] + other_cav
+
         if self.train:
             # shuffle the cav list
             random.shuffle(cav_list)
@@ -66,6 +85,8 @@ class Adaptor:
         work in basedataset -> reinitialize
         """
         if self.train and not self.calibrate: 
+            if self.use_mapping_in_train:
+                return self.mapping_dict[modality_name]
             # always assign the ego_modality to idx 0 in cav_list
             if idx_in_cav_list == 0:
                 return np.random.choice(self.ego_modality.split("&"))

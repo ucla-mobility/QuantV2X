@@ -29,8 +29,9 @@ ego_diff_cav: False
 
 
 heter:
-  assignment_path: "opencood/modality_assign/v2xreal_4modality.json" 
+  assignment_path: "opencood/modality_assign/v2xreal_4modality_gencomm.json" 
   ego_modality: &ego_modality "m1"
+  force_ego_first: true
   lidar_channels_dict:
     m3: 32
   mapping_dict:
@@ -344,7 +345,7 @@ model:
 
 
 loss:
-  core_method: point_pillar_gencomm_loss_mc
+  core_method: point_pillar_loss_mc
   args:
     num_class: *num_class
     pos_cls_weight: 2.0
@@ -362,9 +363,6 @@ loss:
       type: 'WeightedSoftmaxClassificationLoss'
       weight: 0.2
       args: *dir_args
-    depth:
-      weight: 1.0
-    generate_weight: 1
 
 optimizer:
   core_method: Adam
@@ -378,4 +376,3 @@ lr_scheduler:
   gamma: 0.1
   step_size: [5]
   # step_size: [3]
-
