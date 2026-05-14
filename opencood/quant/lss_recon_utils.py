@@ -236,7 +236,11 @@ class GetDcFpLayerInpOut:
             mean_loss = 0
             std_loss = 0
             for num, (bn_stat, hook) in enumerate(zip(self.bn_stats, hooks)):
+                if hook.inputs is None or len(hook.inputs) == 0:
+                    continue
                 tmp_input = hook.inputs[0]
+                if tmp_input is None:
+                    continue
                 bn_mean, bn_std = bn_stat[0], bn_stat[1]
                 tmp_mean = torch.mean(tmp_input.view(tmp_input.size(0),
                                                     tmp_input.size(1), -1),

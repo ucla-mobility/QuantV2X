@@ -65,15 +65,178 @@ def seed_all(seed=42):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-def get_train_samples(train_loader, num_batches=128):
+def _is_agent_modality(name):
+    return isinstance(name, str) and name.startswith("m") and name[1:].isdigit() and name != "m0"
+
+
+def _modality_sort_key(name):
+    return int(name[1:]) if _is_agent_modality(name) else 10**9
+
+
+def _infer_calibration_modalities(hypes):
+    """
+    Infer which real CAV modality branches are active from the config.
+    Model args are the safest source because they describe branches that will
+    actually be instantiated (for STAMP final: m1/m2/m3/m4; for pair models:
+    m1/m2, m1/m3, etc.).
+    """
+    model_args = hypes.get("model", {}).get("args", {})
+    modalities = sorted(
+        [name for name in model_args.keys() if _is_agent_modality(name)],
+        key=_modality_sort_key,
+    )
+    if modalities:
+        return modalities
+
+    mapping_dict = hypes.get("heter", {}).get("mapping_dict", {})
+    modalities = sorted(
+        [name for name in set(mapping_dict.values()) if _is_agent_modality(name)],
+        key=_modality_sort_key,
+    )
+    return modalities
+
+
+def _infer_calibration_cav_count(hypes, modalities):
+    use_cav = hypes.get("use_cav", None)
+    if isinstance(use_cav, int):
+        return use_cav
+    if isinstance(use_cav, str):
+        try:
+            return int(use_cav)
+        except ValueError:
+            pass
+    return len(modalities) if modalities else None
+
+
+def _build_calibration_hypes(hypes):
+    cali_hypes = copy.deepcopy(hypes)
+    quant_cfg = cali_hypes.get("quant", {})
+    cali_cfg = quant_cfg.get("calibration", {})
+
+    fusion_cfg = cali_hypes.get("fusion", {})
+    fusion_core = fusion_cfg.get("core_method")
+    if cali_cfg.get("fusion_core_method"):
+        fusion_cfg["core_method"] = cali_cfg["fusion_core_method"]
+    elif cali_cfg.get("use_non_infer_dataset", False) and isinstance(fusion_core, str) and fusion_core.endswith("infer"):
+        fusion_cfg["core_method"] = fusion_core[:-5]
+
+    if "dataset_mode" in cali_cfg:
+        cali_hypes["dataset_mode"] = cali_cfg["dataset_mode"]
+    if "comm_range" in cali_cfg:
+        cali_hypes["comm_range"] = cali_cfg["comm_range"]
+    if "use_cav" in cali_cfg:
+        cali_hypes["use_cav"] = cali_cfg["use_cav"]
+
+    heter_cfg = cali_hypes.get("heter", {})
+    if "assignment_path" in cali_cfg:
+        heter_cfg["assignment_path"] = cali_cfg["assignment_path"]
+    if "mapping_dict" in cali_cfg:
+        heter_cfg["mapping_dict"] = cali_cfg["mapping_dict"]
+
+    return cali_hypes
+
+
+def _default_skip_quant_module_names(model):
+    skip_names = []
+    if hasattr(model, "gencomm"):
+        skip_names.append("gencomm")
+    if hasattr(model, "enhancer"):
+        skip_names.append("enhancer")
+    for modality_name in getattr(model, "modality_name_list", []):
+        extractor_name = f"message_extractor_{modality_name}"
+        if hasattr(model, extractor_name):
+            skip_names.append(extractor_name)
+    return skip_names
+
+
+def _merge_unique_names(*name_lists):
+    merged = []
+    for names in name_lists:
+        for name in names or []:
+            if not isinstance(name, str) or not name or name in merged:
+                continue
+            merged.append(name)
+    return merged
+
+
+def _get_agent_modalities(batch):
+    if batch is None or "ego" not in batch:
+        return []
+    modalities = batch["ego"].get("agent_modality_list", [])
+    if isinstance(modalities, tuple):
+        modalities = list(modalities)
+    return modalities
+
+
+def _summarize_modalities(samples):
+    summary = {}
+    for sample in samples:
+        key = tuple(sample.get("agent_modality_list", []))
+        summary[key] = summary.get(key, 0) + 1
+    return ", ".join([f"{list(k)} x{v}" for k, v in sorted(summary.items())])
+
+
+def _prepare_runtime_activation_quantizers(model):
+    reset_count = 0
+    for module in model.modules():
+        if isinstance(module, (QuantModule, BaseQuantBlock)) and hasattr(module, "act_quantizer"):
+            module.act_quantizer.set_inited(False)
+            reset_count += 1
+    return reset_count
+
+
+def get_train_samples(train_loader, num_batches=128, hypes=None):
+    if num_batches <= 0:
+        print("Calibration target disabled: num_cali_batches <= 0")
+        return []
+
     train_data = []
+    same_count_fallback = []
+    hypes = hypes or {}
+
+    target_modalities = _infer_calibration_modalities(hypes)
+    target_cav_count = _infer_calibration_cav_count(hypes, target_modalities)
+    required_modalities = set(target_modalities)
+
+    print(
+        "Calibration target: "
+        f"cav_count={target_cav_count}, modalities={target_modalities or 'any'}"
+    )
+
     for batch in train_loader:
-        # IMPORTANT: if agent number is inconsistent among frames in list, caching will have error later.
-        if len(batch['ego']['agent_modality_list']) != 2:
+        modalities = _get_agent_modalities(batch)
+        if len(modalities) == 0:
             continue
-        train_data.append(batch['ego'])
+
+        # Keep CAV count consistent; quant caches can have shape mismatches
+        # when samples with different agent counts are mixed.
+        if target_cav_count is not None and len(modalities) != target_cav_count:
+            continue
+
+        if required_modalities and not required_modalities.issubset(set(modalities)):
+            same_count_fallback.append(batch["ego"])
+            continue
+
+        train_data.append(batch["ego"])
         if len(train_data) >= num_batches:
             break
+
+    if len(train_data) == 0 and len(same_count_fallback) > 0:
+        print(
+            "[WARNING] No calibration sample contained all required modalities; "
+            "falling back to same-CAV-count samples."
+        )
+        train_data = same_count_fallback[:num_batches]
+
+    if len(train_data) < num_batches:
+        print(
+            f"[WARNING] Requested {num_batches} calibration batches but found "
+            f"{len(train_data)} matching batches."
+        )
+
+    print(f"Selected {len(train_data)} calibration batches.")
+    if train_data:
+        print("Calibration modality summary:", _summarize_modalities(train_data))
     return train_data
 
 def test_parser():
@@ -152,9 +315,25 @@ if __name__ == '__main__':
         hypes['dataset_mode'] = opt.dataset_mode
     print(hypes['dataset_mode'])
 
+    cali_hypes = _build_calibration_hypes(hypes)
+
+    config_modalities = _infer_calibration_modalities(hypes)
+    config_cav_count = _infer_calibration_cav_count(hypes, config_modalities)
+    if config_cav_count is not None and 'use_cav' not in hypes:
+        # Heter infer datasets use this to decide how many CAVs to keep.
+        # Non-infer datasets ignore it, but calibration filtering below uses
+        # the same inferred target.
+        hypes['use_cav'] = config_cav_count
+
+    cali_modalities = _infer_calibration_modalities(cali_hypes)
+    cali_cav_count = _infer_calibration_cav_count(cali_hypes, cali_modalities)
+    if cali_cav_count is not None and 'use_cav' not in cali_hypes:
+        cali_hypes['use_cav'] = cali_cav_count
+
     # Building data loaders
     print('Dataset Building')
-    opencood_train_dataset = build_dataset(hypes, visualize=False, train=True, calibrate=True) # if calibrate, ignore comm range
+    print('Calibration fusion core:', cali_hypes['fusion']['core_method'])
+    opencood_train_dataset = build_dataset(cali_hypes, visualize=False, train=True, calibrate=True) # if calibrate, ignore comm range
     opencood_test_dataset = build_dataset(hypes, visualize=True, train=False, calibrate=False)
     # opencood_test_subset = Subset(opencood_test_dataset, range(650,651))
     train_loader = DataLoader(opencood_train_dataset,
@@ -203,13 +382,34 @@ if __name__ == '__main__':
                 ,'prob': opt.prob }
     
     cali_time_start = time.time()
+
+    quant_cfg = hypes.get("quant", {})
+    use_default_skip_quant_modules = quant_cfg.get("use_default_skip_quant_modules", True)
+    default_skip_quant_module_names = (
+        _default_skip_quant_module_names(trained_model)
+        if use_default_skip_quant_modules
+        else []
+    )
+    skip_quant_module_names = _merge_unique_names(
+        default_skip_quant_module_names,
+        quant_cfg.get("skip_quant_module_names", []),
+    )
+    if skip_quant_module_names:
+        print("Keeping modules in FP during PTQ:", skip_quant_module_names)
     
-    fp_model = QuantModel(model=fp_model, weight_quant_params=wq_params, act_quant_params=aq_params, is_fusing=False)
+    fp_model = QuantModel(model=fp_model,
+                          weight_quant_params=wq_params,
+                          act_quant_params=aq_params,
+                          is_fusing=False,
+                          skip_quant_module_names=skip_quant_module_names)
     fp_model.cuda()
     fp_model.eval()
     fp_model.set_quant_state(False, False)
     
-    qt_model = QuantModel(model=trained_model, weight_quant_params=wq_params, act_quant_params=aq_params)
+    qt_model = QuantModel(model=trained_model,
+                          weight_quant_params=wq_params,
+                          act_quant_params=aq_params,
+                          skip_quant_module_names=skip_quant_module_names)
     qt_model.cuda()
     qt_model.eval()
 
@@ -223,22 +423,37 @@ if __name__ == '__main__':
     ic(fp_model)
 
 
-    qt_model.disable_network_output_quantization()
+    if quant_cfg.get("disable_output_head_quantization", True):
+        qt_model.disable_network_output_quantization()
     print('the quantized model is below!')
     ic(qt_model)
 
-    cali_data = get_train_samples(train_loader, num_batches = opt.num_cali_batches)
     device = next(qt_model.parameters()).device
-
-    # Kwargs for weight rounding calibration
-    kwargs = dict(cali_data=cali_data, iters=opt.iters_w, weight=opt.weight,
-                b_range=(opt.b_start, opt.b_end), warmup=opt.warmup, opt_mode='mse',
-                lr=opt.lr, input_prob=opt.input_prob, keep_gpu=not opt.keep_cpu, 
-                lamb_r=opt.lamb_r, T=opt.T, bn_lr=opt.bn_lr, lamb_c=opt.lamb_c)
-
 
     '''init weight quantizer'''
     set_weight_quantize_params(qt_model)
+
+    run_calibration = opt.num_cali_batches > 0
+    kwargs = None
+    if run_calibration:
+        cali_data = get_train_samples(train_loader, num_batches=opt.num_cali_batches, hypes=cali_hypes)
+        if len(cali_data) == 0:
+            raise RuntimeError(
+                "No calibration data matched the configured CAV/modalities. "
+                "Check heter.mapping_dict/model.args or lower the requested CAV count."
+            )
+        # Kwargs for weight rounding calibration
+        kwargs = dict(cali_data=cali_data, iters=opt.iters_w, weight=opt.weight,
+                    b_range=(opt.b_start, opt.b_end), warmup=opt.warmup, opt_mode='mse',
+                    lr=opt.lr, input_prob=opt.input_prob, keep_gpu=not opt.keep_cpu,
+                    lamb_r=opt.lamb_r, T=opt.T, bn_lr=opt.bn_lr, lamb_c=opt.lamb_c)
+    else:
+        reset_count = _prepare_runtime_activation_quantizers(qt_model)
+        print(
+            "Skipping PTQ calibration/reconstruction because num_cali_batches <= 0. "
+            f"Weights are still quantized, and {reset_count} activation quantizers "
+            "will initialize on the first inference batches."
+        )
         
     def recon_model(qt: nn.Module, fp: nn.Module):
 
@@ -317,7 +532,8 @@ if __name__ == '__main__':
                 recon_model(module, fp_module)
     
     # Start calibration
-    recon_model(qt_model, fp_model)
+    if run_calibration:
+        recon_model(qt_model, fp_model)
     qt_model.set_quant_state(weight_quant=True, act_quant=True)
     cali_time_end = time.time()
     print('Quantization is done!')

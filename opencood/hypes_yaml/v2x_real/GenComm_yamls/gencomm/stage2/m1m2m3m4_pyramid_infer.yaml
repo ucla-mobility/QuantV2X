@@ -111,6 +111,13 @@ fusion:
     grid_conf: None # place-holder
     data_aug_conf: None # place-holder
 
+quant:
+  calibration:
+    use_non_infer_dataset: true
+  use_default_skip_quant_modules: false
+  disable_output_head_quantization: false
+  skip_quant_module_names: []
+
 
 preprocess:
   # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor

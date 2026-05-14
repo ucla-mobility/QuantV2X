@@ -6,8 +6,10 @@ from .fold_bn import search_fold_and_remove_bn
 
 class QuantModel(nn.Module):
 
-    def __init__(self, model: nn.Module, weight_quant_params: dict = {}, act_quant_params: dict = {}, is_fusing=True):
+    def __init__(self, model: nn.Module, weight_quant_params: dict = {}, act_quant_params: dict = {},
+                 is_fusing=True, skip_quant_module_names=None):
         super().__init__()
+        self.skip_quant_module_names = tuple(skip_quant_module_names or [])
         if is_fusing:
             search_fold_and_remove_bn(model)
             self.model = model
@@ -16,7 +18,14 @@ class QuantModel(nn.Module):
             self.model = model
             self.quant_module_refactor_wo_fuse(self.model, weight_quant_params, act_quant_params)
 
-    def quant_module_refactor(self, module: nn.Module, weight_quant_params: dict = {}, act_quant_params: dict = {}):
+    def _should_skip_quantization(self, full_name: str, local_name: str) -> bool:
+        for skip_name in self.skip_quant_module_names:
+            if local_name == skip_name or full_name == skip_name or full_name.startswith(f"{skip_name}."):
+                return True
+        return False
+
+    def quant_module_refactor(self, module: nn.Module, weight_quant_params: dict = {}, act_quant_params: dict = {},
+                              parent_name: str = ""):
         """
         Recursively replace only `opencood_specials` modules with their quantized versions and fuse BatchNorm.
         :param module: nn.Module with submodules in `opencood_specials`
@@ -25,8 +34,9 @@ class QuantModel(nn.Module):
         """
         prev_quantmodule = None  # Store last quantized module to attach BatchNorm
         for name, child_module in module.named_children():
+            full_name = f"{parent_name}.{name}" if parent_name else name
             # Skip unquantized layers
-            if name in specials_unquantized_names:
+            if name in specials_unquantized_names or self._should_skip_quantization(full_name, name):
                 continue
 
             # If the module is in `opencood_specials`, replace it with its quantized counterpart
@@ -48,10 +58,11 @@ class QuantModel(nn.Module):
                 continue
 
             else:
-                self.quant_module_refactor(child_module, weight_quant_params, act_quant_params)
+                self.quant_module_refactor(child_module, weight_quant_params, act_quant_params, full_name)
 
 
-    def quant_module_refactor_wo_fuse(self, module: nn.Module, weight_quant_params: dict = {}, act_quant_params: dict = {}):
+    def quant_module_refactor_wo_fuse(self, module: nn.Module, weight_quant_params: dict = {}, act_quant_params: dict = {},
+                                      parent_name: str = ""):
         """
         Recursively replace only `opencood_specials` modules with their quantized versions but leave BatchNorm unchanged.
         :param module: nn.Module with submodules in `opencood_specials`
@@ -60,8 +71,9 @@ class QuantModel(nn.Module):
         """
         prev_quantmodule = None  # Store last quantized module to attach BatchNorm
         for name, child_module in module.named_children():
+            full_name = f"{parent_name}.{name}" if parent_name else name
 
-            if name in specials_unquantized_names:
+            if name in specials_unquantized_names or self._should_skip_quantization(full_name, name):
                 continue
 
             if type(child_module) in opencood_specials:
@@ -89,7 +101,7 @@ class QuantModel(nn.Module):
                 continue
 
             else:
-                self.quant_module_refactor_wo_fuse(child_module, weight_quant_params, act_quant_params)
+                self.quant_module_refactor_wo_fuse(child_module, weight_quant_params, act_quant_params, full_name)
 
 
     def set_quant_state(self, weight_quant: bool = False, act_quant: bool = False):
@@ -115,14 +127,13 @@ class QuantModel(nn.Module):
         # a_list[0].bitwidth_refactor(8)
 
     def disable_network_output_quantization(self):
-        module_list = []
-        for m in self.model.modules():
-            if isinstance(m, QuantModule):
-                module_list += [m]
-        if len(module_list) == 3: 
-            module_list[-1].disable_act_quant = True
-            module_list[-2].disable_act_quant = True
-            module_list[-3].disable_act_quant = True # for the last 3 detection heads
+        head_prefixes = ("cls_head", "reg_head", "dir_head")
+        for name, module in self.model.named_modules():
+            if not isinstance(module, QuantModule):
+                continue
+            leaf_name = name.rsplit(".", 1)[-1]
+            if leaf_name.startswith(head_prefixes):
+                module.disable_act_quant = True
 
     def get_memory_footprint(self):
             """Calculate the total memory footprint of the model's parameters and buffers."""

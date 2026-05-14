@@ -230,7 +230,11 @@ class GetDcFpLayerInpOut:
             _ = self.layer(modified_input)
             mean_loss, std_loss = 0, 0
             for bn_stat, hook in zip(self.bn_stats, hooks):
+                if hook.inputs is None or len(hook.inputs) == 0:
+                    continue
                 tmp_input = hook.inputs[0]  # (B, C, H, W) or similar
+                if tmp_input is None:
+                    continue
                 bn_mean, bn_std = bn_stat # shape [16]
 
                 # Transpose to [C, N] so we can compute per-channel stats

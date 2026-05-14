@@ -143,7 +143,9 @@ def encoder_reconstruction(qt_model: QuantModel, fp_model: QuantModel, qt_block:
     loss_func = LossFunction(qt_block, round_loss=loss_mode, weight=weight, max_count=iters, rec_loss=rec_loss,
                              b_range=b_range, decay_start=0, warmup=warmup, p=p, lam=lamb_r, T=T)
     device = 'cuda'
-    sz = len(cali_data)
+    sz = min(len(cached_inp_list), len(cached_outs), len(cur_syms), cached_output.shape[0])
+    if sz == 0:
+        raise RuntimeError("No valid calibration outputs for this encoder layer; check calibration data.")
     for i in range(iters):
         idx = torch.randint(0, sz, ())
         cur_inp = cached_inp_list[idx].to(device)

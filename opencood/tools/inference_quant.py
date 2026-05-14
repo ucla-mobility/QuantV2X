@@ -55,7 +55,19 @@ def seed_all(seed=42):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+def _prepare_runtime_activation_quantizers(model):
+    reset_count = 0
+    for module in model.modules():
+        if isinstance(module, (QuantModule, BaseQuantBlock)) and hasattr(module, "act_quantizer"):
+            module.act_quantizer.set_inited(False)
+            reset_count += 1
+    return reset_count
+
 def get_train_samples(train_loader, num_batches=128):
+    if num_batches <= 0:
+        print("Calibration target disabled: num_cali_batches <= 0")
+        return []
+
     train_data = []
     for batch in train_loader:
         # IMPORTANT: if agent number is inconsistent among frames in list, caching will have error later.
@@ -245,18 +257,31 @@ def main():
     print('the quantized model is below!')
     ic(qt_model)
 
-    cali_data = get_train_samples(train_loader, num_batches = opt.num_cali_batches)
     device = next(qt_model.parameters()).device
-
-    # Kwargs for weight rounding calibration
-    kwargs = dict(cali_data=cali_data, iters=opt.iters_w, weight=opt.weight,
-                b_range=(opt.b_start, opt.b_end), warmup=opt.warmup, opt_mode='mse',
-                lr=opt.lr, input_prob=opt.input_prob, keep_gpu=not opt.keep_cpu, 
-                lamb_r=opt.lamb_r, T=opt.T, bn_lr=opt.bn_lr, lamb_c=opt.lamb_c)
-
 
     '''init weight quantizer'''
     set_weight_quantize_params(qt_model)
+
+    run_calibration = opt.num_cali_batches > 0
+    kwargs = None
+    if run_calibration:
+        cali_data = get_train_samples(train_loader, num_batches=opt.num_cali_batches)
+        if len(cali_data) == 0:
+            raise RuntimeError(
+                "No calibration data matched the requested setup."
+            )
+        # Kwargs for weight rounding calibration
+        kwargs = dict(cali_data=cali_data, iters=opt.iters_w, weight=opt.weight,
+                    b_range=(opt.b_start, opt.b_end), warmup=opt.warmup, opt_mode='mse',
+                    lr=opt.lr, input_prob=opt.input_prob, keep_gpu=not opt.keep_cpu,
+                    lamb_r=opt.lamb_r, T=opt.T, bn_lr=opt.bn_lr, lamb_c=opt.lamb_c)
+    else:
+        reset_count = _prepare_runtime_activation_quantizers(qt_model)
+        print(
+            "Skipping PTQ calibration/reconstruction because num_cali_batches <= 0. "
+            f"Weights are still quantized, and {reset_count} activation quantizers "
+            "will initialize on the first inference batches."
+        )
         
     def recon_model(qt: nn.Module, fp: nn.Module):
 
@@ -292,7 +317,8 @@ def main():
                 recon_model(module, fp_module)
     
     # Start calibration
-    recon_model(qt_model, fp_model)
+    if run_calibration:
+        recon_model(qt_model, fp_model)
     qt_model.set_quant_state(weight_quant=True, act_quant=True)
     cali_time_end = time.time()
     print('Quantization is done!')

@@ -13,18 +13,76 @@ from .pyramid_recon_utils import get_pyramid_input, get_pyramid_out
 
 include = False
 
+def _candidate_modalities(model):
+    modalities = []
+    ego_modality = getattr(model, "ego_modality", None)
+    if isinstance(ego_modality, str):
+        modalities.extend([m for m in ego_modality.split("&") if m])
+    modalities.extend(getattr(model, "modality_name_list", []))
+    for name, _ in model.named_children():
+        if name.startswith("reg_head_"):
+            modalities.append(name.replace("reg_head_", "", 1))
+    return list(dict.fromkeys(modalities))
+
+
+def _head_accepts_feature(head, feature):
+    if not isinstance(feature, torch.Tensor) or feature.dim() < 2:
+        return True
+
+    in_channels = getattr(head, "in_channels", None)
+    if in_channels is None and hasattr(head, "weight"):
+        weight = getattr(head, "weight")
+        if isinstance(weight, torch.Tensor) and weight.dim() >= 2:
+            groups = getattr(head, "groups", None)
+            if groups is None and hasattr(head, "fwd_kwargs"):
+                groups = head.fwd_kwargs.get("groups", 1)
+            groups = 1 if groups is None else groups
+            in_channels = weight.shape[1] * groups
+
+    return in_channels is None or feature.shape[1] == in_channels
+
+
+def _run_detection_heads(model, feature: torch.Tensor, suffix: str = ""):
+    pred_items = []
+    for head_name in ("cls_head", "reg_head", "dir_head"):
+        module_name = f"{head_name}_{suffix}" if suffix else head_name
+        head = getattr(model, module_name, None)
+        if head is None or not _head_accepts_feature(head, feature):
+            continue
+        pred_items.append(head(feature))
+
+    if len(pred_items) >= 2:
+        return torch.cat(pred_items, dim=1)
+    if pred_items:
+        return pred_items[0]
+    return None
+
+
 def forward_from_fusion(model, fused_feature: torch.Tensor):
     """
     Given fused_feature (output of model.pyramid_backbone), run the rest of the model
     and return the final predictions.
     """
-    shrinked_feature = model.shrink_conv(fused_feature)
+    if hasattr(model, "shrink_conv") and hasattr(model, "reg_head"):
+        shrinked_feature = model.shrink_conv(fused_feature)
+        output = _run_detection_heads(model, shrinked_feature)
+        if output is not None:
+            return output
 
-    cls_preds = model.cls_head(shrinked_feature)
-    reg_preds = model.reg_head(shrinked_feature)
-    dir_preds = model.dir_head(shrinked_feature)
+    # STAMP-style pyramid models keep fusion/head modules per target
+    # modality and do not have a shared shrink_conv/reg_head.
+    for modality_name in _candidate_modalities(model):
+        feature = fused_feature
+        shrink_flag = getattr(model, f"shrink_flag_{modality_name}", False)
+        shrink_conv = getattr(model, f"shrink_conv_{modality_name}", None)
+        if shrink_flag and shrink_conv is not None:
+            feature = shrink_conv(feature)
 
-    return reg_preds
+        output = _run_detection_heads(model, feature, modality_name)
+        if output is not None:
+            return output
+
+    return None
 
 def find_unquantized_module(model: torch.nn.Module, module_list: list = [], name_list: list = []):
     """Store subsequent unquantized modules in a list"""
@@ -162,6 +220,7 @@ def pyramid_reconstruction(qt_model: QuantModel, fp_model: QuantModel, qt_block:
                              b_range=b_range, decay_start=0, warmup=warmup, p=p, lam=lamb_r, T=T)
     device = 'cuda'
     sz = inp1.size(0)
+    warned_pred_shape = False
     for i in range(iters):
         idx = torch.randint(0, sz, ())
         cur_inp1 = inp1[idx].to(device)
@@ -183,6 +242,15 @@ def pyramid_reconstruction(qt_model: QuantModel, fp_model: QuantModel, qt_block:
         '''forward for prediction difference'''
         out_drop, occ_outputs = qt_block(drop_inp, cur_inp2, cur_inp3, cur_inp4, cur_inp5) # noisy input
         output_qt = forward_from_fusion(qt_model.model, out_drop) # flow to the end of the model
+        if output_qt is not None and output_qt.shape != output_fp.shape:
+            if not warned_pred_shape:
+                print(
+                    "Skip prediction-level pyramid loss: "
+                    f"quant output shape {tuple(output_qt.shape)} != "
+                    f"fp output shape {tuple(output_fp.shape)}"
+                )
+                warned_pred_shape = True
+            output_qt = None
         err = loss_func(out_drop, cur_out, output_qt, output_fp, model_qt=qt_model.model)
 
         err.backward(retain_graph=True)
@@ -343,4 +411,3 @@ class SoftBoundingBoxLoss:
         # Total loss
         total_loss = loss_spatial + loss_angle
         return total_loss
-
