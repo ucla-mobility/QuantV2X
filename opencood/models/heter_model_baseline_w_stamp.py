@@ -308,7 +308,44 @@ class HeterModelBaselineWStamp(nn.Module):
         if self.stage == "collab_train" and len(self.modality_name_list) == 1:
             return output_dict[self.modality_name_list[0]]
 
+        if self.stage == "infer":
+            self._attach_quant_calibration_outputs(output_dict)
+
         return output_dict
+
+    def _attach_quant_calibration_outputs(self, output_dict):
+        """
+        Quantization calibration expects top-level prediction tensors, while
+        STAMP inference returns a nested dict keyed by target modality.
+        Attach aliases for the ego-modality output without changing the nested
+        structure used by the normal STAMP post-process path.
+        """
+        if not isinstance(output_dict, dict) or "preds_tensor" in output_dict:
+            return
+
+        ego_modalities = str(getattr(self, "ego_modality", "")).split("&")
+        modality_output = None
+        for modality_name in ego_modalities + self.modality_name_list:
+            candidate = output_dict.get(modality_name)
+            if isinstance(candidate, dict) and "reg_preds" in candidate:
+                modality_output = candidate
+                break
+
+        if modality_output is None:
+            return
+
+        cls_preds = modality_output.get("cls_preds")
+        reg_preds = modality_output.get("reg_preds")
+        dir_preds = modality_output.get("dir_preds")
+        if reg_preds is not None:
+            output_dict.setdefault("reg_preds", reg_preds)
+        if cls_preds is None or reg_preds is None:
+            return
+
+        pred_items = [cls_preds, reg_preds]
+        if dir_preds is not None:
+            pred_items.append(dir_preds)
+        output_dict.setdefault("preds_tensor", torch.cat(pred_items, dim=1))
 
     def bulid_encoder(self, modality_name, model_setting):
         """

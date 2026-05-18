@@ -27,14 +27,68 @@ def find_unquantized_module(model: torch.nn.Module, module_list: list = [], name
             find_unquantized_module(module, module_list, name_list)
     return module_list[1:], name_list[1:]
 
+def _candidate_modalities(model):
+    modalities = []
+    ego_modality = getattr(model, "ego_modality", None)
+    if isinstance(ego_modality, str):
+        modalities.extend([m for m in ego_modality.split("&") if m])
+    modalities.extend(getattr(model, "modality_name_list", []))
+    for name, _ in model.named_children():
+        if name.startswith("reg_head_"):
+            modalities.append(name.replace("reg_head_", "", 1))
+    return list(dict.fromkeys(modalities))
+
+
+def _head_accepts_feature(head, feature):
+    if not isinstance(feature, torch.Tensor) or feature.dim() < 2:
+        return True
+
+    in_channels = getattr(head, "in_channels", None)
+    if in_channels is None and hasattr(head, "weight"):
+        weight = getattr(head, "weight")
+        if isinstance(weight, torch.Tensor) and weight.dim() >= 2:
+            groups = getattr(head, "groups", None)
+            if groups is None and hasattr(head, "fwd_kwargs"):
+                groups = head.fwd_kwargs.get("groups", 1)
+            groups = 1 if groups is None else groups
+            in_channels = weight.shape[1] * groups
+
+    return in_channels is None or feature.shape[1] == in_channels
+
+
+def _run_detection_heads(model, feature: torch.Tensor, suffix: str = ""):
+    pred_items = []
+    for head_name in ("cls_head", "reg_head", "dir_head"):
+        module_name = f"{head_name}_{suffix}" if suffix else head_name
+        head = getattr(model, module_name, None)
+        if head is None or not _head_accepts_feature(head, feature):
+            continue
+        pred_items.append(head(feature))
+
+    if len(pred_items) >= 2:
+        return torch.cat(pred_items, dim=1)
+    if pred_items:
+        return pred_items[0]
+    return None
+
+
 def forward_from_shrinker(model, fused_feature: torch.Tensor):
     """
     Given fused_feature (output of model.pyramid_backbone), run the rest of the model
     and return the final predictions.
     """
-    reg_preds = model.reg_head(fused_feature)
+    output = _run_detection_heads(model, fused_feature)
+    if output is not None:
+        return output
 
-    return reg_preds
+    # STAMP-style models keep one detection head per target modality
+    # (reg_head_m1, reg_head_m2, ...), not a shared top-level reg_head.
+    for modality_name in _candidate_modalities(model):
+        output = _run_detection_heads(model, fused_feature, modality_name)
+        if output is not None:
+            return output
+
+    return None
 
 def block_reconstruction(model: QuantModel, fp_model: QuantModel, block: BaseQuantBlock, fp_block: BaseQuantBlock,
                         cali_data: list, batch_size: int = 1, iters: int = 20000, weight: float = 0.01, 
@@ -118,6 +172,7 @@ def block_reconstruction(model: QuantModel, fp_model: QuantModel, block: BaseQua
                              b_range=b_range, decay_start=0, warmup=warmup, p=p, lam=lamb_r, T=T)
     device = 'cuda'
     sz = cached_inps.size(0) if isinstance(cached_inps, torch.Tensor) else len(cached_inps)
+    warned_pred_shape = False
     for i in range(iters):
         idx = torch.randint(0, sz, () if isinstance(cached_inps, torch.Tensor) else (1,))
         cur_inp = cached_inps[idx].to(device)
@@ -138,6 +193,15 @@ def block_reconstruction(model: QuantModel, fp_model: QuantModel, block: BaseQua
 
         if isinstance(block, QuantDownsampleConv):
             output_qt = forward_from_shrinker(model.model, out_drop)
+            if output_qt is not None and output_qt.shape != output_fp.shape:
+                if not warned_pred_shape:
+                    print(
+                        "Skip prediction-level shrinker loss: "
+                        f"quant output shape {tuple(output_qt.shape)} != "
+                        f"fp output shape {tuple(output_fp.shape)}"
+                    )
+                    warned_pred_shape = True
+                output_qt = None
         else:
             output_qt = None
         err = loss_func(out_drop, cur_out, output_qt, output_fp)

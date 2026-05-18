@@ -70,6 +70,8 @@ def getIntermediateheter3classFusionDataset(cls):
             lidar_channels_dict = params['heter'].get('lidar_channels_dict', OrderedDict())
             mapping_dict = params['heter']['mapping_dict']
             cav_preference = params['heter'].get("cav_preference", None)
+            use_mapping_in_train = params['heter'].get("use_mapping_in_train", False)
+            force_ego_first = params['heter'].get("force_ego_first", False)
 
             self.adaptor = Adaptor(self.ego_modality,
                                    self.modality_name_list,
@@ -78,7 +80,9 @@ def getIntermediateheter3classFusionDataset(cls):
                                    mapping_dict,
                                    cav_preference,
                                    train,
-                                   calibrate)
+                                   calibrate,
+                                   use_mapping_in_train=use_mapping_in_train,
+                                   force_ego_first=force_ego_first)
 
             for modality_name, modal_setting in params['heter']['modality_setting'].items():
                 self.sensor_type_dict[modality_name] = modal_setting['sensor_type']
@@ -373,6 +377,18 @@ def getIntermediateheter3classFusionDataset(cls):
 
             if len(cav_id_list) == 0:
                 return None
+
+            # GenComm stage 2 can train only the partner message extractor.
+            # If every kept agent maps to ego_modality, the whole forward path
+            # is frozen and the loss has no grad_fn, which breaks backward().
+            if (
+                self.train
+                and self.params.get("model", {}).get("core_method") == "heter_model_baseline_w_gencomm_stage2"
+            ):
+                ego_modalities = set(self.ego_modality.split("&"))
+                kept_modalities = [base_data_dict[cav_id]["modality_name"] for cav_id in cav_id_list]
+                if all(modality_name in ego_modalities for modality_name in kept_modalities):
+                    return None
 
             for cav_id in exclude_agent:
                 base_data_dict.pop(cav_id)

@@ -7,6 +7,7 @@ from opencood.tools import train_utils
 from .quant_layer import QuantModule, Union, lp_loss
 from .quant_model import QuantModel
 from .quant_block import BaseQuantBlock
+from .encoder_recon_utils import extract_prediction_tensor
 from tqdm import trange
 
 
@@ -204,22 +205,33 @@ class GetDcFpLayerInpOut:
             try:
                 model_input = train_utils.to_device(model_input, self.device)
                 output_fp = self.model(model_input)
-                output_fp = output_fp['reg_preds']
+                output_fp = extract_prediction_tensor(output_fp)
             except StopForwardException:
                 pass
+            if output_fp is None:
+                handle.remove()
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
+                return None
             if self.data_saver.input_store is None:
                 handle.remove()
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
                 return None
             if len(self.data_saver.input_store) == 0:
                 handle.remove()
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
                 return None
             if self.input_prob:
                 if(isinstance(self.data_saver.input_store[0], dict)):
                     input_sym = self.data_saver.input_store[0]
                 else: # tensor
                     input_sym = self.data_saver.input_store[0].detach()
-            
+        
         handle.remove()
+        for hook_handle in hook_handles:
+            hook_handle.remove()
         para_input = input_sym.data.clone()
         para_input = train_utils.to_device(para_input, self.device)
         para_input.requires_grad = True
@@ -238,7 +250,11 @@ class GetDcFpLayerInpOut:
             mean_loss = 0
             std_loss = 0
             for num, (bn_stat, hook) in enumerate(zip(self.bn_stats, hooks)):
+                if hook.inputs is None or len(hook.inputs) == 0:
+                    continue
                 tmp_input = hook.inputs[0]
+                if tmp_input is None:
+                    continue
                 bn_mean, bn_std = bn_stat[0], bn_stat[1]
                 tmp_mean = torch.mean(tmp_input.view(tmp_input.size(0),
                                                     tmp_input.size(1), -1),

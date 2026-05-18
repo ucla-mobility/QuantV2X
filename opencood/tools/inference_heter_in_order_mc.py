@@ -16,6 +16,7 @@ For Intermediate Fusion, we will switch to IntermediateHeter3classinferFusionDat
 """
 
 import argparse
+import glob
 import os
 import time
 import importlib
@@ -86,8 +87,10 @@ def build_arg_parser():
                         help='interval of saving visualization')
     parser.add_argument('--save_npy', action='store_true',
                         help='save prediction and GT results to npy files')
-    parser.add_argument('--range', type=str, default="204.8,102.4",
-                        help="detection range, e.g., 204.8,102.4")
+    parser.add_argument('--range', type=str, default=None,
+                        help="Override detection range, e.g., 204.8,102.4. "
+                             "If omitted, --respect_config keeps the config range; "
+                             "otherwise the legacy default 204.8,102.4 is used.")
     parser.add_argument('--no_score', action='store_true',
                         help="disable prediction score text in visualization")
     parser.add_argument('--use_cav', type=str, default="[1,2,3,4]",
@@ -102,18 +105,48 @@ def build_arg_parser():
                         help='upsample scale for fused BEV heatmap')
     parser.add_argument('--bevfeat_dpi', type=int, default=500,
                         help='dpi for fused BEV heatmap output')
+    parser.add_argument('--respect_config', action='store_true',
+                        help='Keep config-provided range, mapping_dict, assignment_path, '
+                             'ego_modality, comm_range, and lidar_channels_dict unless an '
+                             'explicit override flag is provided.')
+    parser.add_argument('--comm_range_override', type=float, default=None,
+                        help='Override communication range. '
+                             'If omitted, --respect_config keeps the config value; '
+                             'otherwise the legacy value 180 is used.')
+    parser.add_argument('--ego_modality_override', type=str, default=None,
+                        help='Override ego modality for dynamic inference.')
+    parser.add_argument('--identity_mapping', action='store_true',
+                        help='Force identity heter.mapping_dict during inference.')
+    parser.add_argument('--assignment_in_order', action='store_true',
+                        help='Force heter.assignment_path to use the *_in_order.json variant.')
     return parser
 
 
-def main():
-    opt = build_arg_parser().parse_args()
-    assert opt.fusion_method in ['late', 'early', 'intermediate', 'no', 'no_w_uncertainty', 'single']
+def _configure_eval_hypes(hypes, opt):
+    legacy_mode = not opt.respect_config
 
-    hypes = yaml_utils.load_yaml(None, opt)
+    if 'heter' not in hypes:
+        if opt.range is not None:
+            x_min, x_max = -eval(opt.range.split(',')[0]), eval(opt.range.split(',')[0])
+            y_min, y_max = -eval(opt.range.split(',')[1]), eval(opt.range.split(',')[1])
+            opt.note += f"_{x_max}_{y_max}"
 
-    if 'heter' in hypes:
-        x_min, x_max = -eval(opt.range.split(',')[0]), eval(opt.range.split(',')[0])
-        y_min, y_max = -eval(opt.range.split(',')[1]), eval(opt.range.split(',')[1])
+            new_cav_range = [x_min, y_min, hypes['postprocess']['anchor_args']['cav_lidar_range'][2],
+                             x_max, y_max, hypes['postprocess']['anchor_args']['cav_lidar_range'][5]]
+            hypes = update_dict(hypes, {
+                "cav_lidar_range": new_cav_range,
+                "lidar_range": new_cav_range,
+                "gt_range": new_cav_range
+            })
+        return hypes, legacy_mode
+
+    range_override = opt.range
+    if range_override is None and legacy_mode:
+        range_override = "204.8,102.4"
+
+    if range_override is not None:
+        x_min, x_max = -eval(range_override.split(',')[0]), eval(range_override.split(',')[0])
+        y_min, y_max = -eval(range_override.split(',')[1]), eval(range_override.split(',')[1])
         opt.note += f"_{x_max}_{y_max}"
 
         new_cav_range = [x_min, y_min, hypes['postprocess']['anchor_args']['cav_lidar_range'][2],
@@ -125,6 +158,13 @@ def main():
             "gt_range": new_cav_range
         })
 
+        yaml_utils_lib = importlib.import_module("opencood.hypes_yaml.yaml_utils")
+        for name, func in yaml_utils_lib.__dict__.items():
+            if name == hypes["yaml_parser"]:
+                hypes = func(hypes)
+                break
+
+    if opt.identity_mapping or legacy_mode:
         hypes = update_dict(hypes, {
             "mapping_dict": {
                 "m1": "m1",
@@ -134,15 +174,55 @@ def main():
             }
         })
 
-        yaml_utils_lib = importlib.import_module("opencood.hypes_yaml.yaml_utils")
-        for name, func in yaml_utils_lib.__dict__.items():
-            if name == hypes["yaml_parser"]:
-                hypes = func(hypes)
-                break
+    if opt.assignment_in_order or legacy_mode:
+        hypes['heter']['assignment_path'] = hypes['heter']['assignment_path'].replace(".json", "_in_order.json")
+
+    ego_override = opt.ego_modality_override
+    if ego_override is None and legacy_mode:
+        ego_override = "m1"
+    if ego_override is not None:
+        hypes = update_dict(hypes, {"ego_modality": ego_override})
+
+    comm_range_override = opt.comm_range_override
+    if comm_range_override is None and legacy_mode:
+        comm_range_override = 180
+    if comm_range_override is not None:
+        hypes['comm_range'] = comm_range_override
+
+    return hypes, legacy_mode
+
+
+def _assert_has_checkpoint(model_dir):
+    ckpt_patterns = [
+        os.path.join(model_dir, 'net_epoch_bestval_at*.pth'),
+        os.path.join(model_dir, 'net_epoch*.pth'),
+    ]
+    ckpts = []
+    for pattern in ckpt_patterns:
+        ckpts.extend(glob.glob(pattern))
+    if not ckpts:
+        raise FileNotFoundError(
+            f"No checkpoint found in {model_dir}. "
+            "Inference would run with randomly initialized weights. "
+            "Create/copy the merged checkpoint first, or point --model_dir to a directory that contains "
+            "'net_epoch*.pth' or 'net_epoch_bestval_at*.pth'."
+        )
+
+
+def main():
+    opt = build_arg_parser().parse_args()
+    assert opt.fusion_method in ['late', 'early', 'intermediate', 'no', 'no_w_uncertainty', 'single']
+
+    hypes = yaml_utils.load_yaml(None, opt)
+    hypes, legacy_mode = _configure_eval_hypes(hypes, opt)
 
     hypes['validate_dir'] = hypes['test_dir']
     left_hand = True if ("OPV2V" in hypes['test_dir'] or "V2XSET" in hypes['test_dir']) else False
     print(f"Left hand visualizing: {left_hand}")
+    if legacy_mode:
+        print("Applying legacy dynamic-inference overrides. Use --respect_config for fair config-based evaluation.")
+    else:
+        print("Respecting config-provided dynamic inference settings unless explicit override flags are supplied.")
 
     if 'box_align' in hypes:
         hypes['box_align']['val_result'] = hypes['box_align']['test_result']
@@ -152,6 +232,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     print('Loading Model from checkpoint')
+    _assert_has_checkpoint(opt.model_dir)
     resume_epoch, model = train_utils.load_saved_model(opt.model_dir, model)
     print(f"resume from {resume_epoch} epoch.")
     opt.note += f"_epoch{resume_epoch}"
@@ -210,9 +291,6 @@ def main():
         fusion_core = hypes['fusion']['core_method']
         if fusion_core in ['intermediate', 'intermediateheter', 'intermediateheter3class']:
             hypes['fusion']['core_method'] = f"{fusion_core}infer"
-    hypes['comm_range'] = 180
-    hypes['heter']['assignment_path'] = hypes['heter']['assignment_path'].replace(".json", "_in_order.json")
-    hypes = update_dict(hypes, {"ego_modality": 'm1'})
     gt_range = hypes['postprocess']['gt_range']
 
     if opt.lidar_degrade:
@@ -221,7 +299,7 @@ def main():
         opt.use_cav = "[4]"
         use_cav_and_lidar_config_pair = [(4, lidar_dict1), (4, lidar_dict2)]
     else:
-        base_lidar = {'m3': 32}
+        base_lidar = {'m3': 32} if legacy_mode else None
         use_cav_and_lidar_config_pair = [(x, base_lidar) for x in eval(opt.use_cav)]
 
     class_names = list(opencood.data_utils.SUPER_CLASS_MAP.keys())

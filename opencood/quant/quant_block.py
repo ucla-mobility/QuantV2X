@@ -261,7 +261,7 @@ class QuantBaseBEVBackbone(BaseQuantBlock):
                 conv_layer = QuantModule(base_block[4 + (k-1)*3], weight_quant_params, act_quant_params)
                 conv_layer.norm_function = base_block[5 + (k-1)*3]  # BatchNorm2D
                 conv_layer.activation_function = base_block[6 + (k-1)*3]  # ReLU
-                wrapped_block.extend([conv_layer])
+                wrapped_block.add_module(str(len(wrapped_block)), conv_layer)
 
             self.blocks.append(wrapped_block)
 

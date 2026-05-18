@@ -7,6 +7,7 @@ from opencood.tools import train_utils
 from .quant_layer import QuantModule, Union, lp_loss
 from .quant_model import QuantModel
 from .quant_block import BaseQuantBlock
+from .encoder_recon_utils import extract_prediction_tensor
 from tqdm import trange
 
 def get_pyramid_out(model: QuantModel, layer: Union[QuantModule, BaseQuantBlock], 
@@ -19,12 +20,17 @@ def get_pyramid_out(model: QuantModel, layer: Union[QuantModule, BaseQuantBlock]
 
     print("Start correcting {} batches of data!".format(len(cali_data)))
     for i in range(len(cali_data)):
+        result = get_inp_out(cali_data[i])
+        if result is None:
+            continue
         if input_prob:
-            cur_out, out_fp, cur_sym = get_inp_out(cali_data[i])
+            cur_out, out_fp, cur_sym = result
             cached_batches.append((cur_out.cpu(), out_fp.cpu(), cur_sym.cpu()))
         else:
-            cur_out, out_fp = get_inp_out(cali_data[i])
+            cur_out, out_fp = result
             cached_batches.append((cur_out.cpu(), out_fp.cpu()))
+    if len(cached_batches) == 0:
+        raise RuntimeError("No valid calibration outputs for pyramid fusion; check calibration data.")
     cached_outs = torch.cat([x[0] for x in cached_batches])
     cached_outputs = torch.cat([x[1] for x in cached_batches])
     if input_prob:
@@ -58,22 +64,26 @@ def get_pyramid_input(model: QuantModel,
     is_dict = False
 
     for i in range(len(cali_data)):
-        inp1, inp2, inp3, inp4, inp5 = get_inp_out(cali_data[i])
+        result = get_inp_out(cali_data[i])
+        if result is None:
+            continue
+        inp1, inp2, inp3, inp4, inp5 = result
         cached_b1.append(inp1.unsqueeze(0).cpu())
         cached_b2.append(inp2.unsqueeze(0).cpu())
         cached_b3.append(inp3.unsqueeze(0).cpu())
         cached_b4.append(inp4)
         cached_b5.append(inp5)
-
-        cached_inp1 = torch.cat([x for x in cached_b1])
-        cached_inp2 = torch.cat([x for x in cached_b2])
-        cached_inp3 = torch.cat([x for x in cached_b3])
-        torch.cuda.empty_cache()
-        if keep_gpu:
-            cached_inp1 = cached_inp1.to(device)
-            cached_inp2 = cached_inp2.to(device)
-            cached_inp3 = cached_inp3.to(device)
-        return cached_inp1, cached_inp2, cached_inp3, cached_b4, cached_b5
+    if len(cached_b1) == 0:
+        raise RuntimeError("No valid calibration inputs for pyramid fusion; check calibration data.")
+    cached_inp1 = torch.cat([x for x in cached_b1])
+    cached_inp2 = torch.cat([x for x in cached_b2])
+    cached_inp3 = torch.cat([x for x in cached_b3])
+    torch.cuda.empty_cache()
+    if keep_gpu:
+        cached_inp1 = cached_inp1.to(device)
+        cached_inp2 = cached_inp2.to(device)
+        cached_inp3 = cached_inp3.to(device)
+    return cached_inp1, cached_inp2, cached_inp3, cached_b4, cached_b5
 
 
 class StopForwardException(Exception):
@@ -140,6 +150,8 @@ class GetBlockInpOut:
                 pass
 
         handle.remove()
+        if self.data_saver.input_store is None or len(self.data_saver.input_store) < 5:
+            return None
 
         inp1 = self.data_saver.input_store[0] # float32 (2, 64, 256, 256)
         inp2 = self.data_saver.input_store[1] # int64 (2)
@@ -191,9 +203,14 @@ class get_fp_inpout:
             try:
                 model_input = train_utils.to_device(model_input, self.device)
                 output_fp = self.model(model_input)
-                output_fp = output_fp['reg_preds']
+                output_fp = extract_prediction_tensor(output_fp)
             except StopForwardException:
                 pass
+            if output_fp is None:
+                handle.remove()
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
+                return None
             if self.input_prob:
                 input_sym = self.data_saver.input_store[0].detach() # float32 (2, 64, 256, 256) heter_feature_2d
                 inp2 = self.data_saver.input_store[1].detach()
@@ -202,6 +219,8 @@ class get_fp_inpout:
                 inp5 = self.data_saver.input_store[4]
             
         handle.remove()
+        for hook_handle in hook_handles:
+            hook_handle.remove()
         para_input = input_sym.data.clone()
         para_input = train_utils.to_device(para_input, self.device)
         para_input.requires_grad = True
@@ -220,7 +239,11 @@ class get_fp_inpout:
             mean_loss = 0
             std_loss = 0
             for num, (bn_stat, hook) in enumerate(zip(self.bn_stats, hooks)):
+                if hook.inputs is None or len(hook.inputs) == 0:
+                    continue
                 tmp_input = hook.inputs[0]
+                if tmp_input is None:
+                    continue
                 bn_mean, bn_std = bn_stat[0], bn_stat[1]
                 tmp_mean = torch.mean(tmp_input.view(tmp_input.size(0),
                                                     tmp_input.size(1), -1),

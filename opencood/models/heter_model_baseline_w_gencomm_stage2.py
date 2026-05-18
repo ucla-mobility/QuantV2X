@@ -43,7 +43,7 @@ class HeterModelBaselineWGenCommStage2(nn.Module):
         self.cav_range = args['lidar_range']
         self.sensor_type_dict = OrderedDict()
         self.cam_crop_info = {}
-        self.fix_modules = ['cls_head','gencomm', 'reg_head', 'dir_head', 'fusion_net']
+        self.fix_modules = ['cls_head', 'gencomm', 'reg_head', 'dir_head', 'fusion_net']
 
         # setup each modality model
         for modality_name in self.modality_name_list:
@@ -170,6 +170,7 @@ class HeterModelBaselineWGenCommStage2(nn.Module):
         if 'shrink_header' in args:
             self.shrink_flag = True
             self.shrink_conv = DownsampleConv(args['shrink_header'])
+            self.fix_modules += ["shrink_conv"]
         if 'enhancer' in args:
             self.enhancer = Enhancer(self.args['enhancer']['in_ch'], [8, 8], 4)
             print("use enhancev12")
@@ -207,6 +208,12 @@ class HeterModelBaselineWGenCommStage2(nn.Module):
             for p in eval(f"self.{module}").parameters():
                 p.requires_grad_(False)
             eval(f"self.{module}").apply(fix_bn)
+
+    def model_train_init(self):
+        # train.py calls model.train() at the start of each epoch, which puts
+        # BatchNorm layers back into train mode. Re-apply the stage-2 freeze so
+        # frozen shared modules do not drift differently across pair models.
+        self.model_train_init_stage2()
     
     def model_train_init_compressor(self):
         if self.compress:
@@ -227,7 +234,6 @@ class HeterModelBaselineWGenCommStage2(nn.Module):
         # print(agent_modality_list)
 
         modality_count_dict = Counter(agent_modality_list)
-        print(modality_count_dict)
         modality_feature_dict = {}
         modality_message_dict = {}
 
@@ -361,6 +367,9 @@ class HeterModelBaselineWGenCommStage2(nn.Module):
                             'reg_preds': reg_preds,
                             'dir_preds': dir_preds,
                             'message': heter_message})
+        output_dict.update({
+            'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)
+        })
 
         return output_dict
 

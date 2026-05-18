@@ -21,6 +21,37 @@ def stack_tensors_channelwise(tensor_list):
     
     return torch.cat(tensor_list, dim=0)
 
+
+def extract_prediction_tensor(output):
+    """
+    Quant calibration only needs a stable model-level prediction tensor for
+    caching. Different model families expose this differently:
+    - STAMP quant path may attach preds_tensor.
+    - GenComm/HEAL usually return top-level cls/reg/dir tensors.
+    - STAMP native inference returns nested modality dictionaries.
+    """
+    if not isinstance(output, dict):
+        return None
+
+    if isinstance(output.get("preds_tensor"), torch.Tensor):
+        return output["preds_tensor"]
+
+    pred_items = []
+    for key in ("cls_preds", "reg_preds", "dir_preds"):
+        value = output.get(key)
+        if isinstance(value, torch.Tensor):
+            pred_items.append(value)
+    if pred_items:
+        return torch.cat(pred_items, dim=1)
+
+    for value in output.values():
+        if isinstance(value, dict):
+            pred_tensor = extract_prediction_tensor(value)
+            if pred_tensor is not None:
+                return pred_tensor
+
+    return None
+
 def get_encoder_out(model: QuantModel, layer: Union[QuantModule, BaseQuantBlock], cali_data: list,
                     batch_size: int = 32, keep_gpu: bool = True,
                     input_prob: bool = False, lamb=50, bn_lr=1e-3):
@@ -31,12 +62,17 @@ def get_encoder_out(model: QuantModel, layer: Union[QuantModule, BaseQuantBlock]
 
     print("Start correcting {} batches of data!".format(len(cali_data)))
     for i in range(len(cali_data)):
+        result = get_inp_out(cali_data[i])
+        if result is None:
+            continue
         if input_prob:
-            cur_out, out_fp, cur_sym = get_inp_out(cali_data[i])
+            cur_out, out_fp, cur_sym = result
             cached_batches.append((cur_out.cpu(), out_fp.cpu(), cur_sym.cpu()))
         else:
-            cur_out, out_fp = get_inp_out(cali_data[i])
+            cur_out, out_fp = result
             cached_batches.append((cur_out.cpu(), out_fp.cpu()))
+    if len(cached_batches) == 0:
+        raise RuntimeError("No valid calibration outputs for this encoder layer; check calibration data.")
     cached_outs = list(x[0] for x in cached_batches) # list of (C, H, W)
     cached_outputs = torch.cat([x[1] for x in cached_batches])
     if input_prob:
@@ -100,7 +136,7 @@ def get_encoder_input(model: QuantModel, block: Union[QuantModule, BaseQuantBloc
         torch.cuda.empty_cache()
         if keep_gpu:
             cached_inps = cached_inps.to(device)
-        return cached_inps # tensor
+        return cached_inps, cached_batches, channel_sizes
 
 
 class StopForwardException(Exception):
@@ -217,14 +253,23 @@ class GetDcFpLayerInpOut:
             try:
                 model_input = train_utils.to_device(model_input, self.device)
                 output_fp = self.model(model_input)
-                output_fp = output_fp['preds_tensor']
+                output_fp = extract_prediction_tensor(output_fp)
+                if output_fp is None:
+                    handle.remove()
+                    for hook_handle in hook_handles:
+                        hook_handle.remove()
+                    return None
             except StopForwardException:
                 pass
             if self.data_saver.input_store is None:
                 handle.remove()
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
                 return None
             if len(self.data_saver.input_store) == 0:
                 handle.remove()
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
                 return None
             if self.input_prob:
                 if(isinstance(self.data_saver.input_store[0], dict)):
@@ -251,7 +296,11 @@ class GetDcFpLayerInpOut:
             mean_loss = 0
             std_loss = 0
             for num, (bn_stat, hook) in enumerate(zip(self.bn_stats, hooks)):
+                if hook.inputs is None or len(hook.inputs) == 0:
+                    continue
                 tmp_input = hook.inputs[0]
+                if tmp_input is None:
+                    continue
                 bn_mean, bn_std = bn_stat[0], bn_stat[1]
                 tmp_mean = torch.mean(tmp_input.view(tmp_input.size(0),
                                                     tmp_input.size(1), -1),
@@ -273,6 +322,8 @@ class GetDcFpLayerInpOut:
                 
         with torch.no_grad():
             out_fp = self.layer(para_input)
+        for hook_handle in hook_handles:
+            hook_handle.remove()
         
         out_fp = out_fp
         if self.input_prob:

@@ -329,6 +329,9 @@ class HeterModelBaselineWGenCommStage1(nn.Module):
                             'reg_preds': reg_preds,
                             'dir_preds': dir_preds,
                             'message': conditions})
+        output_dict.update({
+            'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)
+        })
 
         return output_dict
 

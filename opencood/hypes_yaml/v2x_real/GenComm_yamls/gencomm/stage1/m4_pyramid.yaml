@@ -204,7 +204,9 @@ model:
       input_dim: 384 # 128 * 3
 
     fusion_method: pyramid
+    supervise_single: false
     in_head: 256
+    in_head_single: 256
     num_class: *num_class
 
 
@@ -213,7 +215,7 @@ model:
 
 
 loss:
-  core_method: point_pillar_gencomm_loss_mc
+  core_method: point_pillar_gencomm_pyramid_loss_mc
   args:
     num_class: *num_class
     pos_cls_weight: 2.0
@@ -233,11 +235,14 @@ loss:
       args: *dir_args
     depth:
       weight: 1.0
+    pyramid:
+      relative_downsample: [1, 2, 4]
+      weight: [0.1, 0.05, 0.025]
     generate_weight: 1
 
 optimizer:
   core_method: Adam
-  lr: 0.002
+  lr: 0.001
   args:
     eps: 1e-10
     weight_decay: 1e-4

@@ -15,6 +15,7 @@ For Intermediate Fusion, we will switch to IntermediateHeterinferFusionDataset
 """
 
 import argparse
+import glob
 import os
 import time
 from typing import OrderedDict
@@ -45,8 +46,9 @@ def test_parser():
     parser.add_argument('--save_npy', action='store_true',
                         help='whether to save prediction and gt result'
                              'in npy file')
-    parser.add_argument('--range', type=str, default="204.8,102.4",
-                        help="detection range is [-204.8, +204.8, -102.4, +102.4]")
+    parser.add_argument('--range', type=str, default=None,
+                        help="Override detection range. If omitted, --respect_config keeps "
+                             "the config range; otherwise the legacy default 204.8,102.4 is used.")
     parser.add_argument('--no_score', action='store_true',
                         help="whether print the score of prediction")
     parser.add_argument('--use_cav', type=str, default="[1,2,3,4]",
@@ -54,35 +56,67 @@ def test_parser():
     parser.add_argument('--lidar_degrade', action='store_true',
                         help="whether to degrade lidar. {m1:32, m3:16} and {m1:16, m3:16}")
     parser.add_argument('--note', default="", type=str, help="any other thing?")
+    parser.add_argument('--respect_config', action='store_true',
+                        help='Keep config-provided range, mapping_dict, assignment_path, '
+                             'ego_modality, comm_range, and lidar_channels_dict unless an '
+                             'explicit override flag is provided.')
+    parser.add_argument('--comm_range_override', type=float, default=None,
+                        help='Override communication range. '
+                             'If omitted, --respect_config keeps the config value; '
+                             'otherwise the legacy value 180 is used.')
+    parser.add_argument('--ego_modality_override', type=str, default=None,
+                        help='Override ego modality for dynamic inference.')
+    parser.add_argument('--identity_mapping', action='store_true',
+                        help='Force identity heter.mapping_dict during inference.')
+    parser.add_argument('--assignment_in_order', action='store_true',
+                        help='Force heter.assignment_path to use the *_in_order.json variant.')
     opt = parser.parse_args()
     return opt
 
 
-def main():
-    opt = test_parser()
+def configure_eval_hypes(hypes, opt):
+    legacy_mode = not opt.respect_config
 
-    assert opt.fusion_method in ['late', 'early', 'intermediate', 'no', 'no_w_uncertainty', 'single'] 
+    if 'heter' not in hypes:
+        if opt.range is not None:
+            x_min, x_max = -eval(opt.range.split(',')[0]), eval(opt.range.split(',')[0])
+            y_min, y_max = -eval(opt.range.split(',')[1]), eval(opt.range.split(',')[1])
+            opt.note += f"_{x_max}_{y_max}"
 
-    hypes = yaml_utils.load_yaml(None, opt)
+            new_cav_range = [x_min, y_min, hypes['postprocess']['anchor_args']['cav_lidar_range'][2],
+                             x_max, y_max, hypes['postprocess']['anchor_args']['cav_lidar_range'][5]]
+            hypes = update_dict(hypes, {
+                "cav_lidar_range": new_cav_range,
+                "lidar_range": new_cav_range,
+                "gt_range": new_cav_range
+            })
+        return hypes, legacy_mode
 
-    if 'heter' in hypes:
-        # hypes['heter']['lidar_channels'] = 16
-        # opt.note += "_16ch"
+    range_override = opt.range
+    if range_override is None and legacy_mode:
+        range_override = "204.8,102.4"
 
-        x_min, x_max = -eval(opt.range.split(',')[0]), eval(opt.range.split(',')[0])
-        y_min, y_max = -eval(opt.range.split(',')[1]), eval(opt.range.split(',')[1])
+    if range_override is not None:
+        x_min, x_max = -eval(range_override.split(',')[0]), eval(range_override.split(',')[0])
+        y_min, y_max = -eval(range_override.split(',')[1]), eval(range_override.split(',')[1])
         opt.note += f"_{x_max}_{y_max}"
 
-        new_cav_range = [x_min, y_min, hypes['postprocess']['anchor_args']['cav_lidar_range'][2], \
-                            x_max, y_max, hypes['postprocess']['anchor_args']['cav_lidar_range'][5]]
+        new_cav_range = [x_min, y_min, hypes['postprocess']['anchor_args']['cav_lidar_range'][2],
+                         x_max, y_max, hypes['postprocess']['anchor_args']['cav_lidar_range'][5]]
 
-        # replace all appearance
         hypes = update_dict(hypes, {
             "cav_lidar_range": new_cav_range,
             "lidar_range": new_cav_range,
             "gt_range": new_cav_range
         })
 
+        yaml_utils_lib = importlib.import_module("opencood.hypes_yaml.yaml_utils")
+        for name, func in yaml_utils_lib.__dict__.items():
+            if name == hypes["yaml_parser"]:
+                hypes = func(hypes)
+                break
+
+    if opt.identity_mapping or legacy_mode:
         hypes = update_dict(hypes, {
             "mapping_dict": {
                 "m1": "m1",
@@ -92,12 +126,48 @@ def main():
             }
         })
 
-        # reload anchor
-        yaml_utils_lib = importlib.import_module("opencood.hypes_yaml.yaml_utils")
-        for name, func in yaml_utils_lib.__dict__.items():
-            if name == hypes["yaml_parser"]:
-                parser_func = func
-        hypes = parser_func(hypes)
+    if opt.assignment_in_order or legacy_mode:
+        hypes['heter']['assignment_path'] = hypes['heter']['assignment_path'].replace(".json", "_in_order.json")
+
+    ego_override = opt.ego_modality_override
+    if ego_override is None and legacy_mode:
+        ego_override = "m1"
+    if ego_override is not None:
+        hypes = update_dict(hypes, {"ego_modality": ego_override})
+
+    comm_range_override = opt.comm_range_override
+    if comm_range_override is None and legacy_mode:
+        comm_range_override = 180
+    if comm_range_override is not None:
+        hypes['comm_range'] = comm_range_override
+
+    return hypes, legacy_mode
+
+
+def _assert_has_checkpoint(model_dir):
+    ckpt_patterns = [
+        os.path.join(model_dir, 'net_epoch_bestval_at*.pth'),
+        os.path.join(model_dir, 'net_epoch*.pth'),
+    ]
+    ckpts = []
+    for pattern in ckpt_patterns:
+        ckpts.extend(glob.glob(pattern))
+    if not ckpts:
+        raise FileNotFoundError(
+            f"No checkpoint found in {model_dir}. "
+            "Inference would run with randomly initialized weights. "
+            "Create/copy the merged checkpoint first, or point --model_dir to a directory that contains "
+            "'net_epoch*.pth' or 'net_epoch_bestval_at*.pth'."
+        )
+
+
+def main():
+    opt = test_parser()
+
+    assert opt.fusion_method in ['late', 'early', 'intermediate', 'no', 'no_w_uncertainty', 'single'] 
+
+    hypes = yaml_utils.load_yaml(None, opt)
+    hypes, legacy_mode = configure_eval_hypes(hypes, opt)
 
         
     
@@ -111,6 +181,10 @@ def main():
     left_hand = True if ("OPV2V" in hypes['test_dir'] or "V2XSET" in hypes['test_dir']) else False
 
     print(f"Left hand visualizing: {left_hand}")
+    if legacy_mode:
+        print("Applying legacy dynamic-inference overrides. Use --respect_config for fair config-based evaluation.")
+    else:
+        print("Respecting config-provided dynamic inference settings unless explicit override flags are supplied.")
 
     if 'box_align' in hypes.keys():
         hypes['box_align']['val_result'] = hypes['box_align']['test_result']
@@ -122,6 +196,7 @@ def main():
 
     print('Loading Model from checkpoint')
     saved_path = opt.model_dir
+    _assert_has_checkpoint(saved_path)
     resume_epoch, model = train_utils.load_saved_model(saved_path, model)
     print(f"resume from {resume_epoch} epoch.")
     opt.note += f"_epoch{resume_epoch}"
@@ -134,12 +209,9 @@ def main():
     np.random.seed(303)
 
     if opt.fusion_method == 'intermediate':
-        hypes['fusion']['core_method'] += 'infer' 
-    hypes['comm_range'] = 180
-    hypes['heter']['assignment_path'] = hypes['heter']['assignment_path'].replace(".json", "_in_order.json")
-    hypes = update_dict(hypes, {
-            "ego_modality": 'm1'
-        })
+        fusion_core = hypes['fusion']['core_method']
+        if fusion_core in ['intermediate', 'intermediateheter', 'intermediateheter3class']:
+            hypes['fusion']['core_method'] = f"{fusion_core}infer"
     
     if opt.lidar_degrade:
         lidar_dict1 = {
@@ -153,9 +225,7 @@ def main():
         opt.use_cav = "[4]"
         use_cav_and_lidar_config_pair = [(4, lidar_dict1), (4, lidar_dict2)]
     else:
-        lidar_dict0 = {
-            'm3': 32
-        }
+        lidar_dict0 = {'m3': 32} if legacy_mode else None
         use_cav_and_lidar_config_pair = [(x, lidar_dict0) for x in eval(opt.use_cav)]
 
     for (use_cav, lidar_config) in use_cav_and_lidar_config_pair:

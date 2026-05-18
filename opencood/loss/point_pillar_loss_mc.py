@@ -213,7 +213,8 @@ class PointPillarLossMC(nn.Module):
 
         self.loss_dict.update({'total_loss': total_loss,
                                'reg_loss': reg_loss,
-                               'cls_loss': conf_loss}) #conf_loss
+                               'cls_loss': conf_loss,
+                               'conf_loss': conf_loss})
 
         return total_loss
 
@@ -301,7 +302,7 @@ class PointPillarLossMC(nn.Module):
         """
         total_loss = self.loss_dict['total_loss']
         reg_loss = self.loss_dict['reg_loss']
-        conf_loss = self.loss_dict['conf_loss']
+        conf_loss = self.loss_dict.get('conf_loss', self.loss_dict.get('cls_loss'))
         if pbar is None:
             print("[epoch %d][%d/%d], || Loss: %.4f || Conf Loss: %.4f"
                 " || Loc Loss: %.4f" % (
