@@ -14,6 +14,7 @@ This work is part of our broader vision of building an __efficient and scalable 
 - [Notebook Tutorial](docs/notebook/QuantV2X_DriveX_Tutorial.ipynb)
 
 ## News
+- **`2026/06`**: [QuantV2X](http://arxiv.org/abs/2509.03704) is accepted by [ECCV 2026](https://eccv.ecva.net/)!
 - **`2025/10`**: This codebase will be featured as the main tutorial repository for [ICCV 2025 Tutorial: Beyond Self-Driving: Exploring Three Levels of Driving Automation](https://drivex-tutorial.github.io/).
 - **`2025/09`**: QuantV2X is selected as **Oral Presentation** in [ICCV 2025 X-Sense Workshop](https://x-sense-ego-exo.github.io/index.html).
 - **`2025/09`**: [QuantV2X](http://arxiv.org/abs/2509.03704) paper release and initial codebase release.
